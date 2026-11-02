@@ -10,15 +10,15 @@ export function SpeakerPanel({meetingId, disabled, onChange}: {
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const [count,setCount]=useState('');
-  const [autoAnalyze,setAutoAnalyze]=useState(true);
+  const [autoAnalyze,setAutoAnalyze]=useState(false);
   const autoAttempted=useRef(new Set<string>());
-  useEffect(()=>{setAutoAnalyze(localStorage.getItem('meetily.autoSpeakerAnalysis')!=='false');},[]);
+  useEffect(()=>{setAutoAnalyze(localStorage.getItem('meetily.autoSpeakerAnalysis')==='true');},[]);
   const currentMeeting=useRef(meetingId);
   currentMeeting.current=meetingId;
   useEffect(()=>{
-    let active=true;setData(null);setError('');setBusy(false);onChange(null);
+    let active=true;setData(null);setCount('');setError('');setBusy(false);onChange(null);
     invoke<SpeakerAnalysis>('speaker_action',{meetingId,action:'get'}).then(result=>{
-      if(active){setData(result);onChange(result);}
+      if(active){setData(result);if(result.requested_speakers&&result.requested_speakers>0)setCount(String(result.requested_speakers));onChange(result);}
     }).catch(reason=>{if(active)setError(String(reason));});
     return()=>{active=false;};
   },[meetingId,onChange]);
@@ -37,17 +37,20 @@ export function SpeakerPanel({meetingId, disabled, onChange}: {
     }
   },[autoAnalyze,disabled,busy,data,meetingId,act]);
   return <details className="border-b border-gray-200 p-3 text-sm">
-    <summary className="cursor-pointer font-medium">Speakers {data?.speakers.length ? `(${data.speakers.length})` : ''}</summary>
+    <summary className="cursor-pointer font-medium">Speakers {data?.analysis_warning?'— re-analysis needed':data?.speakers.length?`(${data.speakers.length})`:''}</summary>
     <div className="mt-3 max-h-[38vh] space-y-3 overflow-y-auto pr-2">
       <p className="text-gray-600">Identify voices after recording. Listen to a sample, name the speaker, and optionally save their voice for future meetings. Audio and voice profiles stay on this Mac.</p>
-      <label className="block"><input type="checkbox" checked={autoAnalyze} onChange={e=>{setAutoAnalyze(e.target.checked);localStorage.setItem('meetily.autoSpeakerAnalysis',String(e.target.checked));}} className="mr-2"/>Automatically identify voices when opening saved meetings, once a voice profile exists</label>
+      <label className="block"><input type="checkbox" checked={autoAnalyze} onChange={e=>{setAutoAnalyze(e.target.checked);localStorage.setItem('meetily.autoSpeakerAnalysis',String(e.target.checked));}} className="mr-2"/>Experimental: automatically detect speakers when opening saved meetings</label>
+      {!!data?.unassigned_seconds && <p className="text-xs text-gray-600">About {Math.round(data.unassigned_seconds)} seconds of speech could not be assigned reliably. These passages remain unassigned rather than creating extra speakers.</p>}
+      {data?.analysis_warning && <p role="alert" className="text-amber-800">{data.analysis_warning}</p>}
+      <p className="text-xs text-gray-600">For meetings, enter the known number of people who spoke. Automatic counts are experimental and can split one person into many groups.</p>
       <fieldset disabled={busy||disabled} className="space-y-3 disabled:opacity-60">
         <div className="flex items-center gap-2">
-          <label>Speaker count <input aria-label="Speaker count (leave empty for automatic)" type="number" min={1} max={20} placeholder="Auto" value={count} onChange={e=>setCount(e.target.value)} className="w-20 rounded border p-1"/></label>
+          <label>Speaker count <input aria-label="Speaker count (leave empty for automatic)" type="number" min={1} max={20} placeholder="Known count" value={count} onChange={e=>setCount(e.target.value)} className="w-20 rounded border p-1"/></label>
           <button type="button" className="rounded border px-3 py-1" onClick={()=>act('analyze',{numSpeakers:count?Number(count):-1,force:!!data?.segments.length})}>{data?.segments.length?'Re-detect speakers':'Detect speakers'}</button>
         </div>
         {!!data?.segments.length && <p className="text-xs text-gray-500">Re-detecting replaces this meeting’s speaker labels. Saved voice profiles remain.</p>}
-        {data?.speakers.map(speaker=><form key={`${meetingId}:${speaker.id}:${speaker.name}`} className="space-y-2 rounded border p-3" onSubmit={event=>{
+        {!data?.analysis_warning&&data?.speakers.map(speaker=><form key={`${meetingId}:${speaker.id}:${speaker.name}`} className="space-y-2 rounded border p-3" onSubmit={event=>{
           event.preventDefault();
           const form=new FormData(event.currentTarget);
           const profileId=String(form.get('profile')||'');

@@ -14,6 +14,7 @@ MATCH_THRESHOLD = 0.65
 MATCH_MARGIN = 0.10
 MIN_ENROLL_SECONDS = 8.0
 MIN_MATCH_SECONDS = 5.0
+MAX_AUTOMATIC_SPEAKERS = 20
 
 
 def match_voice(embedding, profiles):
@@ -58,7 +59,107 @@ def clean_intervals(segment, all_segments):
     return [(start + .1, end - .1) for start, end in intervals if end - start >= .7]
 
 
+
+def requested_count(request):
+    count = request.get('num_speakers', -1)
+    if type(count) is not int or (count != -1 and not 1 <= count <= 20):
+        raise ValueError('Enter a speaker count from 1 to 20, or -1 for experimental automatic detection.')
+    return count
+
+
+def clustering_warning(result):
+    actual = len(result.get('speakers', []))
+    expected = result.get('requested_speakers', -1)
+    limit = expected if expected > 0 else MAX_AUTOMATIC_SPEAKERS
+    if actual > limit:
+        return (f'Speaker detection split this recording into {actual} groups. '
+                'This result is unreliable. Enter the known number of speakers and re-detect before naming or saving voices.')
+    return None
+
+
+def validate_turn_count(turns, count):
+    actual = len({turn['speaker'] for turn in turns if turn['speaker'] != '__unassigned__'})
+    limit = count if count > 0 else MAX_AUTOMATIC_SPEAKERS
+    if actual > limit:
+        raise ValueError(f'Speaker clustering produced {actual} groups, exceeding {limit}. '
+                         'No new analysis was saved. Enter the known number of speakers and re-detect.')
+    return actual
+
+
+def consolidate_fragments(result, count):
+    """Cluster reliable fragment vectors globally; abstain on short/noisy fragments.
+
+    Complete-link cutting with a fixed k can spend clusters on acoustic outliers.
+    Duration-weighted spherical k-means instead fits the reliable speech vectors.
+    This does not establish identities: users still review samples before naming.
+    """
+    import numpy as np
+    candidates = [speaker for speaker in result['speakers']
+                  if speaker.get('embedding') and not speaker.get('mixed')
+                  and speaker['clean_seconds'] >= 3]
+    if len(candidates) < count:
+        raise ValueError(f'Only {len(candidates)} reliable voice fragments were available for {count} speakers. '
+                         'No new analysis was saved. Review the recording or try a lower count if some attendees did not speak.')
+    vectors = np.asarray([speaker['embedding'] for speaker in candidates], dtype=float)
+    norms = np.linalg.norm(vectors, axis=1)
+    if not np.isfinite(vectors).all() or (norms < 1e-8).any():
+        raise ValueError('Invalid voice embeddings; no new analysis was saved.')
+    vectors /= norms[:, None]
+    weights = np.asarray([min(speaker['clean_seconds'], 60) for speaker in candidates])
+    seeds = [int(np.argmax(weights))]
+    while len(seeds) < count:
+        distance = np.maximum(0, 1-(vectors @ vectors[seeds].T).max(axis=1))
+        scores = weights * distance**2
+        scores[seeds] = -1
+        next_seed = int(np.argmax(scores))
+        if scores[next_seed] <= 1e-8:
+            raise ValueError('There are fewer distinct usable voices than the requested count.')
+        seeds.append(next_seed)
+    centers = vectors[seeds].copy()
+    previous = None
+    for _ in range(100):
+        assignment = np.argmax(vectors @ centers.T, axis=1)
+        if previous is not None and np.array_equal(previous, assignment):
+            break
+        previous = assignment.copy()
+        for cluster in range(count):
+            mask = assignment == cluster
+            if not mask.any():
+                raise ValueError('A speaker group has no reliable speech. Try a lower count.')
+            center = (vectors[mask] * weights[mask, None]).sum(axis=0)
+            centers[cluster] = center / np.linalg.norm(center)
+    similarity = (vectors * centers[assignment]).sum(axis=1)
+    by_fragment = {speaker['id']:int(assignment[i]) for i,speaker in enumerate(candidates) if similarity[i] >= .55}
+    first_turn = {cluster:min((turn['start'] for turn in result['segments'] if by_fragment.get(turn['speaker']) == cluster), default=float('inf')) for cluster in range(count)}
+    order = sorted(first_turn, key=first_turn.get)
+    ids = {cluster:str(i) for i,cluster in enumerate(order)}
+    speakers = []
+    for cluster in order:
+        members = [i for i,speaker in enumerate(candidates) if by_fragment.get(speaker['id']) == cluster]
+        if not members:
+            raise ValueError('A speaker group has no confident voice material. No new analysis was saved.')
+        representative = max(members, key=lambda i:weights[i]*similarity[i]**2)
+        selected_weight = weights[members]
+        mixed = float(selected_weight[similarity[members]<.6].sum()) > float(selected_weight.sum())*.2
+        speakers.append({'id':ids[cluster], 'name':'Speaker '+str(len(speakers)+1),
+                         'embedding':centers[cluster].tolist(), 'mixed':mixed,
+                         'clean_seconds':round(sum(candidates[i]['clean_seconds'] for i in members),1),
+                         'sample_path':candidates[representative].get('sample_path'),
+                         'profile_id':None, 'status':'unknown', 'score':None})
+    turns = []
+    for turn in result['segments']:
+        mapped = dict(turn, speaker=ids[by_fragment[turn['speaker']]] if turn['speaker'] in by_fragment else '__unassigned__')
+        if turns and turns[-1]['speaker']==mapped['speaker'] and mapped['start']<=turns[-1]['end']+.25:
+            turns[-1]['end'] = max(turns[-1]['end'],mapped['end'])
+        else:
+            turns.append(mapped)
+    return dict(result, speakers=speakers, segments=turns, requested_speakers=count,
+                clustering_method='duration-weighted-spherical-v1', source_fragments=len(result['speakers']),
+                unassigned_seconds=round(sum(turn['end']-turn['start'] for turn in turns if turn['speaker']=='__unassigned__'),1))
+
+
 def analyze(request, root):
+    count = requested_count(request)
     import numpy as np
     import sherpa_onnx as sherpa
     import soundfile as sf
@@ -68,7 +169,7 @@ def analyze(request, root):
             pyannote=sherpa.OfflineSpeakerSegmentationPyannoteModelConfig(model=str(models/'segmentation.onnx')),
             num_threads=2),
         embedding=sherpa.SpeakerEmbeddingExtractorConfig(model=str(models/'embedding.onnx'), num_threads=2),
-        clustering=sherpa.FastClusteringConfig(num_clusters=request.get('num_speakers', -1), threshold=.5),
+        clustering=sherpa.FastClusteringConfig(num_clusters=-1, threshold=.5),
         min_duration_on=.3, min_duration_off=.5)
     if not config.validate():
         raise ValueError('Speaker models are missing or invalid. Run integrations/speakers/setup.py.')
@@ -85,6 +186,8 @@ def analyze(request, root):
         if len(samples)/rate > 6*3600:
             raise ValueError('Speaker analysis currently supports recordings up to six hours.')
         turns = [{'start':float(turn.start), 'end':float(turn.end), 'speaker':str(turn.speaker)} for turn in diarizer.process(samples).sort_by_start_time()]
+        if count == -1:
+            validate_turn_count(turns, count)
         mapping = {speaker:str(i) for i,speaker in enumerate(sorted({turn['speaker'] for turn in turns},key=int))}
         for turn in turns: turn['speaker'] = mapping[turn['speaker']]
         speakers = []
@@ -133,7 +236,11 @@ def analyze(request, root):
                     sf.write(preview, accepted[0][:rate*12], rate)
                     os.chmod(preview, 0o600)
             speakers.append({'id':speaker,'name':'Speaker '+str(int(speaker)+1),'embedding':vector,'mixed':mixed,'clean_seconds':round(seconds,1),'sample_path':preview,'profile_id':None,'status':'unknown','score':None})
-    return {'model':MODEL_ID,'segments':turns,'speakers':speakers}
+    result = {'model':MODEL_ID,'requested_speakers':count,'segments':turns,'speakers':speakers}
+    if count > 0:
+        result = consolidate_fragments(result, count)
+    validate_turn_count(result['segments'], count)
+    return result
 
 
 def profiles_from(db):
@@ -142,9 +249,11 @@ def profiles_from(db):
 
 def public_result(result, profiles):
     result = json.loads(json.dumps(result))
+    warning = clustering_warning(result)
+    result['analysis_warning'] = warning
     names = {profile['id']:profile['name'] for profile in profiles}
     for speaker in result['speakers']:
-        speaker['can_enroll'] = bool(speaker.get('embedding')) and not speaker.get('mixed') and speaker['clean_seconds'] >= MIN_ENROLL_SECONDS
+        speaker['can_enroll'] = not warning and bool(speaker.get('embedding')) and not speaker.get('mixed') and speaker['clean_seconds'] >= MIN_ENROLL_SECONDS
         speaker.pop('embedding', None)
         if speaker.get('profile_id') in names:
             speaker['name'] = names[speaker['profile_id']]
@@ -171,9 +280,18 @@ def run(request):
         if action in ('forget','rename') and not any(profile['id']==request.get('profile_id') for profile in profiles):
             raise ValueError('The selected voice profile no longer exists.')
         if action == 'analyze':
-            if row and not request.get('force',False):
+            count = requested_count(request)
+            if clustering_warning(result) and count == -1:
+                raise ValueError('The previous automatic analysis over-split the voices. Enter the known speaker count to re-detect.')
+            same_count = result.get('requested_speakers', -1) == count
+            if row and not request.get('force',False) and same_count:
                 return public_result(result,profiles)
             result = analyze(request, root)
+            # Validate again at the persistence boundary, including alternate analyzers.
+            validate_turn_count(result['segments'], count)
+            result['requested_speakers'] = count
+            if clustering_warning(result):
+                raise ValueError(clustering_warning(result))
             for speaker in result['speakers']:
                 if speaker['embedding'] and not speaker.get('mixed') and speaker['clean_seconds'] >= MIN_MATCH_SECONDS:
                     profile, score = match_voice(speaker['embedding'], profiles)
@@ -181,6 +299,8 @@ def run(request):
                     if profile:
                         speaker.update(name=profile['name'],profile_id=profile['id'],status='recognized')
         elif action in ('enroll','label'):
+            if clustering_warning(result):
+                raise ValueError(clustering_warning(result))
             speaker = next((s for s in result['speakers'] if s['id']==request.get('speaker_id')), None)
             if not speaker:
                 raise ValueError('Analyze the meeting and select a speaker first.')

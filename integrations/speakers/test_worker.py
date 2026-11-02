@@ -60,4 +60,67 @@ class SpeakerTests(unittest.TestCase):
    self.assertFalse(result['speakers'][0]['can_enroll'])
    with self.assertRaisesRegex(ValueError,'mix voices'):worker.run(dict(base,action='enroll',speaker_id='0',name='Alice'))
 
+ def test_excessive_clusters_rejected_in_auto_and_fixed_modes(self):
+  turns=[{'speaker':str(i),'start':float(i),'end':float(i+1)} for i in range(111)]
+  for count in [-1,8]:
+   with self.assertRaisesRegex(ValueError,'111 groups'):worker.validate_turn_count(turns,count)
+  self.assertEqual(worker.validate_turn_count(turns[:8],8),8)
+  self.assertEqual(worker.validate_turn_count(turns[:6],8),6)
+
+ def test_legacy_111_cluster_result_cannot_enroll_and_count_change_bypasses_cache(self):
+  with tempfile.TemporaryDirectory() as temp:
+   base={'root':temp,'meeting_id':'broken'}
+   worker.run(dict(base,action='get'))
+   broken={'model':worker.MODEL_ID,'segments':[{'speaker':str(i),'start':float(i),'end':float(i+1)} for i in range(111)],'speakers':[{'id':str(i),'embedding':[1.,0.],'clean_seconds':20.,'name':'Speaker '+str(i)} for i in range(111)]}
+   key=worker.hashlib.sha256(b'broken').hexdigest()
+   with sqlite3.connect(Path(temp)/'voices.sqlite') as db:db.execute('INSERT INTO meetings VALUES (?,?)',(key,json.dumps(broken)))
+   visible=worker.run(dict(base,action='get'))
+   self.assertIn('111 groups',visible['analysis_warning'])
+   self.assertTrue(all(not s['can_enroll'] for s in visible['speakers']))
+   with self.assertRaisesRegex(ValueError,'unreliable'):worker.run(dict(base,action='enroll',speaker_id='0',name='Alice'))
+   with self.assertRaisesRegex(ValueError,'known speaker count'):worker.run(dict(base,action='analyze'))
+   repaired={'model':worker.MODEL_ID,'segments':broken['segments'][:8],'speakers':broken['speakers'][:8]}
+   with patch.object(worker,'analyze',return_value=repaired) as analyze:
+    result=worker.run(dict(base,action='analyze',num_speakers=8))
+    analyze.assert_called_once()
+   self.assertEqual(len(result['speakers']),8)
+   self.assertIsNone(result['analysis_warning'])
+   with patch.object(worker,'analyze') as analyze:
+    worker.run(dict(base,action='analyze',num_speakers=8));analyze.assert_not_called()
+
+ def test_failed_reanalysis_preserves_previous_analysis(self):
+  with tempfile.TemporaryDirectory() as temp:
+   base={'root':temp,'meeting_id':'keep'}
+   valid={'model':worker.MODEL_ID,'segments':[],'speakers':[]}
+   with patch.object(worker,'analyze',return_value=valid):worker.run(dict(base,action='analyze',num_speakers=8))
+   invalid={'model':worker.MODEL_ID,'segments':[{'speaker':str(i)} for i in range(111)],'speakers':[]}
+   with patch.object(worker,'analyze',return_value=invalid):
+    with self.assertRaisesRegex(ValueError,'111 groups'):worker.run(dict(base,action='analyze',num_speakers=8,force=True))
+   self.assertEqual(worker.run(dict(base,action='get'))['speakers'],[])
+
+ def test_count_validation(self):
+  self.assertEqual(worker.requested_count({'num_speakers':8}),8)
+  for value in [0,21,8.5,True,'8',None]:
+   with self.assertRaises(ValueError):worker.requested_count({'num_speakers':value})
+
+ def test_global_clustering_consolidates_111_fragments_without_turning_noise_into_people(self):
+  import numpy as np
+  speakers=[];turns=[]
+  for i in range(111):
+   vector=np.eye(8)[i%8].tolist()
+   speakers.append({'id':str(i),'embedding':vector,'mixed':False,'clean_seconds':12.,'sample_path':None})
+   turns.append({'speaker':str(i),'start':float(i*13),'end':float(i*13+12)})
+  speakers.append({'id':'noise','embedding':None,'mixed':False,'clean_seconds':.4})
+  turns.append({'speaker':'noise','start':1500.,'end':1500.4})
+  result=worker.consolidate_fragments({'speakers':speakers,'segments':turns},8)
+  self.assertEqual(len(result['speakers']),8)
+  self.assertEqual(worker.validate_turn_count(result['segments'],8),8)
+  self.assertEqual(result['segments'][-1]['speaker'],'__unassigned__')
+  self.assertGreater(result['unassigned_seconds'],0)
+  self.assertTrue(all(s['clean_seconds']>=120 for s in result['speakers']))
+
+ def test_too_few_reliable_fragments_does_not_fabricate_speakers(self):
+  result={'speakers':[{'id':'0','embedding':[1.,0.],'mixed':False,'clean_seconds':20.}],'segments':[]}
+  with self.assertRaisesRegex(ValueError,'Only 1 reliable'):worker.consolidate_fragments(result,8)
+
 if __name__=='__main__':unittest.main()

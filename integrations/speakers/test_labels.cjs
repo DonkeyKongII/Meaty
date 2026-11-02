@@ -13,3 +13,5 @@ test('speaker turn labels use audio-relative time',()=>{assert.equal(label(data,
 test('chunks spanning two voices retain both names',()=>{assert.equal(label(data,4,6),'Alice / Bob');});
 test('silence and missing timestamps do not invent an identity',()=>{assert.equal(label(data,11,12),undefined);assert.equal(label(data,NaN,12),undefined);assert.equal(label(null,1,2),undefined);});
 test('small boundary spill does not mislabel a whole chunk',()=>{assert.equal(label(data,1,5.01),'Alice');});
+
+test('unreliable over-clustered analyses do not attribute transcript text',()=>{assert.equal(label({...data,analysis_warning:'111 groups'},1,3),undefined);});

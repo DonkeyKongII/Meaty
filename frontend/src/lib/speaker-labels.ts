@@ -1,5 +1,8 @@
 export interface SpeakerAnalysis {
   model:string;
+  requested_speakers?:number;
+  analysis_warning?:string|null;
+  unassigned_seconds?:number;
   segments:{start:number;end:number;speaker:string}[];
   speakers:{id:string;name:string;clean_seconds:number;can_enroll:boolean;mixed?:boolean;sample_path:string|null;profile_id:string|null;status:'unknown'|'recognized'|'manual';score:number|null}[];
   profiles:{id:string;name:string}[];
@@ -8,7 +11,7 @@ export interface SpeakerAnalysis {
 // Mark transcript chunks with all materially overlapping voices. A chunk spanning
 // a turn change must not falsely attribute the entire sentence to one person.
 export function speakerLabel(data:SpeakerAnalysis|null,start:number,end?:number):string|undefined {
-  if(!data||!Number.isFinite(start))return undefined;
+  if(!data||data.analysis_warning||!Number.isFinite(start))return undefined;
   const stop=end!==undefined&&end>start?end:start+0.5;
   const overlap=new Map<string,number>();
   for(const turn of data.segments){
@@ -18,6 +21,6 @@ export function speakerLabel(data:SpeakerAnalysis|null,start:number,end?:number)
   const maximum=Math.max(0,...overlap.values());
   if(!maximum)return undefined;
   const ids=[...overlap].filter(([,duration])=>duration>=Math.min(0.25,maximum)&&duration>=maximum*0.2).map(([id])=>id);
-  const names=ids.map(id=>data.speakers.find(s=>s.id===id)?.name||'Unknown speaker');
+  const names=ids.map(id=>data.speakers.find(s=>s.id===id)?.name||'Unassigned speech');
   return names.join(' / ');
 }
