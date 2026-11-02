@@ -5,7 +5,7 @@
   let absentSince = null;
   let running = false;
   function joined() {
-    if (!/^\/[a-z]{3}-[a-z]{4}-[a-z]{3}(?:[/?]|$)/.test(location.pathname)) return false;
+    if (!/^\/(?:meet\/)?[a-z]{3}-[a-z]{4}-[a-z]{3}(?:[/?]|$)/.test(location.pathname)) return false;
     return [...document.querySelectorAll('button, [role="button"]')].some(el => {
       const visible = el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
       const label = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('data-tooltip') || ''}`;

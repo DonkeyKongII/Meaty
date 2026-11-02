@@ -24,6 +24,11 @@ test('visible joined-call control triggers and keeps one session on heartbeats',
   const f=fixture({label:'Leave call'});await f.tick();await f.tick();
   assert.ok(f.sent.length>=2);assert.equal(new Set(f.sent.map(m=>m.session)).size,1);
 });
+test('instant meeting /meet/code URLs trigger only after joining', async () => {
+  const preview=fixture({pathname:'/meet/ayq-dxzm-dqu'});await preview.tick();assert.equal(preview.sent.length,0);
+  const joined=fixture({pathname:'/meet/ayq-dxzm-dqu',label:'Leave call'});await joined.tick();assert.ok(joined.sent.length);
+  const ended=fixture({pathname:'/meet/ayq-dxzm-dqu',label:'Rejoin'});await ended.tick();assert.equal(ended.sent.length,0);
+});
 test('hidden controls and non-meeting URLs do not trigger', async () => {
   for(const options of [{label:'Leave call',visible:false},{label:'Leave call',pathname:'/landing'}]) {
     const f=fixture(options);await f.tick();assert.equal(f.sent.length,0);

@@ -5,7 +5,7 @@ This companion extension requests local Meetily recording after a visible joined
 ## Current status
 
 - Implemented on branch `feat/meeting-autostart` against upstream commit `07c4dfd`.
-- 10 extension tests and 5 native-host tests pass; frontend TypeScript check passes.
+- 11 extension tests and 5 native-host tests pass; frontend TypeScript check passes.
 - Full macOS release build succeeds with Xcode installed; the app bundle passes `codesign --verify --deep --strict`. Live Google Meet verification is pending replacement of the currently recording app and user loading of the extension.
 - The automation browser policy blocks `chrome://extensions`; the user must load the unpacked extension there manually.
 - Teams web and Zoom web detectors are not included in this first milestone.
@@ -73,3 +73,5 @@ Google can change its meeting UI. If detection stops working, update the content
 Remove the extension in Chrome. Remove the native host manifest at `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/ai.meetily.meeting_autostart.json` and the `~/Library/Application Support/MeetilyMeetingBridge` directory. Your Meetily recordings and settings are separate and should be retained.
 
 To select a custom app outside Applications, run `python3 integrations/chrome-google-meet/install-host.py --app /absolute/path/meetily.app`. The host preserves this target in its local config file.
+
+Version 0.1.1 also detects instant-meeting URLs under `/meet/<meeting-code>`. After updating an unpacked extension, reload it in Chrome Extensions, then reload/rejoin the Meet page. Prejoin and the post-call Rejoin screen still do not trigger recording.
