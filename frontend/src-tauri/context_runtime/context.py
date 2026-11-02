@@ -75,7 +75,10 @@ def run(db, request):
         from combine import combine
         return combine(db, request, normalize, settings, search_text)
     if action == 'candidates':
-        return [dict(r) for r in db.execute('SELECT m.id,m.title,m.created_at,m.folder_path FROM meetings m WHERE EXISTS(SELECT 1 FROM transcripts t WHERE t.meeting_id=m.id) ORDER BY m.created_at')]
+        from combine import recording_start
+        rows=[dict(r) for r in db.execute('SELECT m.id,m.title,m.created_at,m.folder_path FROM meetings m WHERE EXISTS(SELECT 1 FROM transcripts t WHERE t.meeting_id=m.id)')]
+        for row in rows: row['started_at']=recording_start(db,row).isoformat()
+        return sorted(rows,key=lambda row:(row['started_at'],row['created_at'],row['id']))
     if action == 'pending':
         return [dict(r) for r in db.execute("SELECT m.id,m.title,m.created_at,m.folder_path,c.status FROM meeting_context c JOIN meetings m ON m.id=c.meeting_id WHERE c.status='pending' ORDER BY m.created_at LIMIT 10")]
     if not db.execute('SELECT 1 FROM meetings WHERE id=?', (mid,)).fetchone():

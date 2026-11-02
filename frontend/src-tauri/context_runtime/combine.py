@@ -1,6 +1,30 @@
 """Create a new combined recording. Originals and voice profiles are never modified."""
-import datetime, json, math, shutil, subprocess, uuid, wave
+import datetime, json, math, re, shutil, subprocess, uuid, wave
 from pathlib import Path
+
+def recording_start(db, source, visiting=None):
+    """Recording start, never selection order or the time its transcript was saved."""
+    visiting=set(visiting or ())
+    if source['id'] in visiting: raise ValueError('Invalid combined meeting history')
+    visiting.add(source['id'])
+    row=db.execute('SELECT data FROM meeting_context WHERE meeting_id=?',(source['id'],)).fetchone()
+    context=json.loads(row[0]) if row else {}
+    starts=[]
+    for part in context.get('combined_from',[]):
+        original=db.execute('SELECT * FROM meetings WHERE id=?',(part['meeting_id'],)).fetchone()
+        if original:starts.append(recording_start(db,dict(original),visiting))
+    if starts:return min(starts)
+    folder=Path(source['folder_path']) if source.get('folder_path') else None
+    meta=json.loads((folder/'metadata.json').read_text()) if folder and (folder/'metadata.json').exists() else {}
+    match=re.search(r'_(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})$',str(folder or ''))
+    fallback=f'{match[1]}T{match[2]}:{match[3]}:00+00:00' if match else None
+    for value in [meta.get('created_at'),context.get('recording_started_at'),fallback,source.get('created_at')]:
+        if not value:continue
+        try:
+            parsed=datetime.datetime.fromisoformat(value.replace('Z','+00:00'))
+            return (parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.timezone.utc)).astimezone(datetime.timezone.utc)
+        except (ValueError,TypeError):continue
+    raise ValueError('Cannot determine recording start for '+source['title'])
 
 def combine(db, request, normalize, settings, search_text):
     ids=request.get('meeting_ids',[])
@@ -31,6 +55,8 @@ def combine(db, request, normalize, settings, search_text):
         transcripts=[dict(t) for t in db.execute('SELECT * FROM transcripts WHERE meeting_id=? ORDER BY COALESCE(audio_start_time,0),timestamp',(mid,))]
         if not transcripts: raise ValueError('Each selected meeting must have a saved transcript')
         sources.append((source,folder,meta,transcripts))
+    sources.sort(key=lambda item:(recording_start(db,item[0]),item[0]['created_at'],item[0]['id']))
+    started_at=recording_start(db,sources[0][0]).isoformat()
     base=next((folder.parent for _,folder,_,_ in sources if folder),Path.home()/'Movies/meetily-recordings')
     mid='meeting-'+str(uuid.uuid4());folder=base/('Combined_'+mid)
     folder.mkdir(parents=True,exist_ok=False)
@@ -83,8 +109,8 @@ def combine(db, request, normalize, settings, search_text):
             if output:output.close()
         external_names=[c for c in companies if c.casefold()!='internal']
         companies=external_names or (['Internal'] if companies and all(c=='internal' for c in classifications) else [])
-        data=normalize({'participants':list(participants.values()),'unresolved_source_roster':any(c=='unknown' for c in classifications),'manual_companies':companies,'combined_from':provenance,'recording_started_at':sources[0][2].get('created_at',sources[0][0]['created_at']),'notes':'Combined recording; source meetings retained. Speaker assignments remain in the originals. Detect speakers for this combined recording before regenerating its summary.'},settings)
-        metadata={'version':'1.0','meeting_id':mid,'meeting_name':title,'created_at':sources[0][2].get('created_at',sources[0][0]['created_at']),'completed_at':now,'duration_seconds':total,'devices':{'microphone':None,'system_audio':None},'audio_file':'audio.wav' if include_audio else '', 'transcript_file':'transcripts.json','sample_rate':48000,'status':'completed','combined_from':provenance}
+        data=normalize({'participants':list(participants.values()),'unresolved_source_roster':any(c=='unknown' for c in classifications),'manual_companies':companies,'combined_from':provenance,'recording_started_at':started_at,'notes':'Combined recording; source meetings retained. Speaker assignments remain in the originals. Detect speakers for this combined recording before regenerating its summary.'},settings)
+        metadata={'version':'1.0','meeting_id':mid,'meeting_name':title,'created_at':started_at,'completed_at':now,'duration_seconds':total,'devices':{'microphone':None,'system_audio':None},'audio_file':'audio.wav' if include_audio else '', 'transcript_file':'transcripts.json','sample_rate':48000,'status':'completed','combined_from':provenance}
         (folder/'metadata.json').write_text(json.dumps(metadata,indent=2))
         (folder/'transcripts.json').write_text(json.dumps([{'id':t['id'],'text':t['transcript'],'audio_start_time':t['audio_start_time'],'audio_end_time':t['audio_end_time'],'duration':t.get('duration') or 0,'display_time':t['timestamp'],'confidence':t.get('confidence') or 0.0,'sequence_id':i} for i,t in enumerate(segments)],indent=2))
         (folder/'combined-sources.json').write_text(json.dumps(provenance,indent=2))

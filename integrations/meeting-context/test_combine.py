@@ -21,7 +21,7 @@ class CombineTests(unittest.TestCase):
  def tearDown(self):self.db.close();self.tmp.cleanup()
  def test_audio_timeline_notes_and_originals(self):
   before=[(p,p.read_bytes()) for p in self.base.glob('*/*')]
-  result=run(self.db,self.request);mid=result['id'];folder=Path(result['folder_path'])
+  result=run(self.db,{**self.request,'meeting_ids':['2','1']});mid=result['id'];folder=Path(result['folder_path'])
   with wave.open(str(folder/'audio.wav')) as w:self.assertEqual(w.getnframes(),48000*3)
   rows=self.db.execute('SELECT * FROM transcripts WHERE meeting_id=? ORDER BY audio_start_time',(mid,)).fetchall()
   self.assertEqual([r['transcript'] for r in rows],['Words 1','Words 2']);self.assertAlmostEqual(rows[1]['audio_start_time'],1.1)
@@ -31,9 +31,9 @@ class CombineTests(unittest.TestCase):
   self.assertEqual(len(context['combined_from']),2)
   notes=self.db.execute('SELECT notes_markdown FROM meeting_notes WHERE meeting_id=?',(mid,)).fetchone()[0];self.assertIn('Note 1',notes);self.assertIn('Note 2',notes)
   self.assertIsNone(self.db.execute("SELECT name FROM sqlite_master WHERE name='profiles'").fetchone())
- def test_transcript_only_follows_requested_order(self):
+ def test_transcript_only_ignores_requested_order(self):
   result=run(self.db,{**self.request,'meeting_ids':['2','1'],'include_audio':False});mid=result['id']
-  rows=self.db.execute('SELECT transcript,audio_start_time FROM transcripts WHERE meeting_id=? ORDER BY audio_start_time',(mid,)).fetchall();self.assertEqual(rows[0][0],'Words 2');self.assertAlmostEqual(rows[1][1],2.1)
+  rows=self.db.execute('SELECT transcript,audio_start_time FROM transcripts WHERE meeting_id=? ORDER BY audio_start_time',(mid,)).fetchall();self.assertEqual(rows[0][0],'Words 1');self.assertAlmostEqual(rows[1][1],1.1)
   self.assertFalse((Path(result['folder_path'])/'audio.wav').exists())
  def test_failure_rolls_back_files_and_database(self):
   self.db.execute("CREATE TRIGGER reject_combined BEFORE INSERT ON meetings WHEN NEW.title='Combined call' BEGIN SELECT RAISE(ABORT,'test failure'); END")
@@ -52,6 +52,20 @@ class CombineTests(unittest.TestCase):
   run(self.db,{'action':'save','meeting_id':'2','data':{'participants':[],'manual_companies':[]}})
   result=run(self.db,{**self.request,'include_audio':False})
   self.assertEqual(run(self.db,{'action':'get','meeting_id':result['id']})['classification'],'unknown')
+ def test_start_time_beats_save_time_and_respects_timezone(self):
+  (self.base/'1/metadata.json').write_text(json.dumps({'status':'completed','duration_seconds':1,'created_at':'2026-11-02T23:00:00+02:00'}))
+  (self.base/'2/metadata.json').write_text(json.dumps({'status':'completed','duration_seconds':2,'created_at':'2026-11-02T20:30:00Z'}))
+  self.db.execute("UPDATE meetings SET created_at='2026-11-02T20:00:00Z' WHERE id='1'")
+  rows=run(self.db,{'action':'candidates'});self.assertEqual([r['id'] for r in rows],['2','1'])
+  result=run(self.db,{**self.request,'include_audio':False})
+  context=run(self.db,{'action':'get','meeting_id':result['id']})
+  self.assertEqual([p['meeting_id'] for p in context['combined_from']],['2','1'])
+  self.assertEqual(context['recording_started_at'],'2026-11-02T20:30:00+00:00')
+ def test_folder_start_fallback(self):
+  folder=self.base/'Part_2026-11-02_19-00';folder.mkdir()
+  self.db.execute('UPDATE meetings SET folder_path=? WHERE id=?',(str(folder),'2'))
+  rows=run(self.db,{'action':'candidates'});self.assertEqual(rows[0]['id'],'2')
+  self.assertEqual(rows[0]['started_at'],'2026-11-02T19:00:00+00:00')
  def test_active_source_rejected(self):
   (self.base/'2/metadata.json').write_text('{"status":"recording"}')
   with self.assertRaisesRegex(ValueError,'Finish recording'):run(self.db,self.request)
