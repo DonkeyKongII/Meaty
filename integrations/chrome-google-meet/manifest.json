@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Meetily \u2014 Google Meet Auto Start",
+  "version": "0.1.0",
+  "description": "Start local Meetily recording when you join Google Meet. Stop recording in Meetily.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3+DvEsWbw9L5X8PJyk5mNW9YjSivFLkAkOm88J6yOkrv4YgcF3X+z0KKrozodkDxRa3Vj2Hru6v/zDYWU9deAAIIb8HDUL6fGvayK4AwfGYy7CKuOW5B8vAgqFzk5OTBoKcVQkxat4+AabfB+REYrLYhltKeoQgduKhChXcVlMiXdXUEMMnUVzwgTAID3EwjW0GbYsqpAITFNFq5jQuerki4DVy9FXL9Z4S8CA/opvb9fU1C2zyLTv1HK05qYSmUABgkTlRmkfwLIlRphq5fketPutsauJzoTRT1YX5pMQIAAKn6bCMlXwcm3EhhjK2qpiWTvT5PLnqiu2pa07SAYQIDAQAB",
+  "permissions": [
+    "nativeMessaging",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

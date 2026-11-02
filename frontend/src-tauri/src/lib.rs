@@ -52,6 +52,8 @@ pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
+mod meeting_autostart;
+mod speakers;
 pub mod utils;
 pub mod whisper_engine;
 
@@ -506,6 +508,9 @@ pub fn run() {
 
             log::info!("Application setup complete");
 
+            #[cfg(target_os = "macos")]
+            meeting_autostart::start(_app.handle())?;
+
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
@@ -610,6 +615,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            speakers::speaker_action,
+            meeting_autostart::take_meeting_autostart,
             start_recording,
             stop_recording,
             is_recording,

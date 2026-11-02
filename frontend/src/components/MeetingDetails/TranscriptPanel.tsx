@@ -4,7 +4,9 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { SpeakerPanel } from './SpeakerPanel';
+import { SpeakerAnalysis, speakerLabel } from '@/lib/speaker-labels';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -49,6 +51,8 @@ export function TranscriptPanel({
   meetingFolderPath,
   onRefetchTranscripts,
 }: TranscriptPanelProps) {
+  const [speakerData, setSpeakerData] = useState<SpeakerAnalysis|null>(null);
+
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -58,6 +62,7 @@ export function TranscriptPanel({
     return transcripts.map(t => ({
       id: t.id,
       timestamp: t.audio_start_time ?? 0,
+      audioTimestampKnown: t.audio_start_time != null,
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
@@ -78,10 +83,13 @@ export function TranscriptPanel({
         />
       </div>
 
+      {meetingId && <SpeakerPanel meetingId={meetingId} disabled={isRecording} onChange={setSpeakerData}/>}
+
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
         <VirtualizedTranscriptView
           segments={convertedSegments}
+          speakerLabels={Object.fromEntries(convertedSegments.map(segment => [segment.id, segment.audioTimestampKnown === false ? undefined : speakerLabel(speakerData, segment.timestamp, segment.endTime)]))}
           isRecording={isRecording}
           isPaused={false}
           isProcessing={false}

@@ -174,6 +174,30 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     // The actual recording start/stop is handled in the Home component
   };
 
+  // Consume bridge requests only after the frontend has mounted. Reuse the
+  // normal recording flow so model/device validation and UI state stay intact.
+  useEffect(() => {
+    let busy = false;
+    const timer = setInterval(async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const requested = await invoke<boolean>('take_meeting_autostart');
+        if (requested && !isRecording) {
+          if (pathname === '/') {
+            window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
+          } else {
+            sessionStorage.setItem('autoStartRecording', 'true');
+            router.push('/');
+          }
+        }
+      } catch (error) {
+        console.error('Meeting detection bridge:', error);
+      } finally { busy = false; }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isRecording, pathname, router]);
+
   // Function to search through meeting transcripts
   const searchTranscripts = async (query: string) => {
     if (!query.trim()) {
