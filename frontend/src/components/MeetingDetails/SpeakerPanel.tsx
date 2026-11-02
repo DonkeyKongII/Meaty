@@ -39,7 +39,7 @@ export function SpeakerPanel({meetingId, disabled, onChange}: {
   return <details className="border-b border-gray-200 p-3 text-sm">
     <summary className="cursor-pointer font-medium">Speakers {data?.analysis_warning?'— re-analysis needed':data?.speakers.length?`(${data.speakers.length})`:''}</summary>
     <div className="mt-3 max-h-[38vh] space-y-3 overflow-y-auto pr-2">
-      <p className="text-gray-600">Identify voices after recording. Listen to a sample, name the speaker, and optionally save their voice for future meetings. Audio and voice profiles stay on this Mac.</p>
+      <p className="text-gray-600">Identify voices after recording. Listen to a sample, name the speaker, and optionally save their voice for future meetings. Audio and voice profiles stay on this Mac. After saving speaker names, regenerate the summary to use those assignments.</p>
       <label className="block"><input type="checkbox" checked={autoAnalyze} onChange={e=>{setAutoAnalyze(e.target.checked);localStorage.setItem('meetily.autoSpeakerAnalysis',String(e.target.checked));}} className="mr-2"/>Experimental: automatically detect speakers when opening saved meetings</label>
       {!!data?.unassigned_seconds && <p className="text-xs text-gray-600">About {Math.round(data.unassigned_seconds)} seconds of speech could not be assigned reliably. These passages remain unassigned rather than creating extra speakers.</p>}
       {data?.analysis_warning && <p role="alert" className="text-amber-800">{data.analysis_warning}</p>}

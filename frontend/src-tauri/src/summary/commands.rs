@@ -17,7 +17,7 @@ use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Runtime, Manager};
 
 
 static SUMMARY_START_LOCK: LazyLock<tokio::sync::Mutex<()>> =
@@ -483,6 +483,11 @@ pub async fn api_process_transcript<R: Runtime>(
     );
 
     let pool = state.db_manager.pool().clone();
+    let text = match app.path().app_data_dir() {
+        Ok(root) => crate::speakers::summary_text(&root, &pool, &m_id, &text).await
+            .map_err(|e| format!("Could not load saved speaker assignments: {e}"))?,
+        Err(e) => return Err(format!("Could not locate speaker assignments: {e}")),
+    };
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
 

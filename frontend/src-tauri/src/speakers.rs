@@ -126,3 +126,33 @@ pub async fn speaker_action(
     .await
     .map_err(|e| e.to_string())?
 }
+
+/// Snapshot speaker names at summary start. Only labels/timing enter the prompt.
+pub async fn summary_text(root: &std::path::Path, pool: &sqlx::SqlitePool, meeting_id: &str, text: &str) -> Result<String,String> {
+    use sha2::{Digest,Sha256};
+    use sqlx::{Connection, sqlite::SqliteConnectOptions};
+    use crate::summary::speaker_context::{annotate,Line,Turn};
+    let path=root.join("speaker-recognition/voices.sqlite");
+    if !path.is_file(){return Ok(text.to_owned())}
+    let options=SqliteConnectOptions::new().filename(path).read_only(true);
+    let mut db=sqlx::SqliteConnection::connect_with(&options).await.map_err(|e|e.to_string())?;
+    let key=format!("{:x}",Sha256::digest(meeting_id.as_bytes()));
+    let data:Option<String>=sqlx::query_scalar("SELECT data FROM meetings WHERE id=?").bind(key).fetch_optional(&mut db).await.map_err(|e|e.to_string())?;
+    let Some(data)=data else{return Ok(text.to_owned())};
+    let data:Value=serde_json::from_str(&data).map_err(|e|e.to_string())?;
+    let speakers=data["speakers"].as_array().ok_or("Invalid saved speaker analysis")?;
+    let expected=data["requested_speakers"].as_i64().unwrap_or(-1);
+    let limit=if expected>0{expected as usize}else{20};
+    if speakers.len()>limit || data["analysis_warning"].as_str().is_some(){return Ok(text.to_owned())}
+    let profiles:Vec<(String,String)>=sqlx::query_as("SELECT id,name FROM profiles").fetch_all(&mut db).await.map_err(|e|e.to_string())?;
+    let profiles:std::collections::HashMap<_,_>=profiles.into_iter().collect();
+    let names=speakers.iter().filter_map(|s|{
+        let id=s["id"].as_str()?;
+        let name=s["profile_id"].as_str().and_then(|id|profiles.get(id).map(String::as_str)).or_else(||s["name"].as_str())?;
+        Some((id.to_owned(),name.to_owned()))
+    }).collect();
+    let turns=data["segments"].as_array().ok_or("Invalid saved speaker turns")?.iter().filter_map(|t|Some(Turn{start:t["start"].as_f64()?,end:t["end"].as_f64()?,speaker:t["speaker"].as_str()?.to_owned()})).collect::<Vec<_>>();
+    let rows:Vec<(Option<f64>,Option<f64>,String)>=sqlx::query_as("SELECT audio_start_time,audio_end_time,transcript FROM transcripts WHERE meeting_id=?").bind(meeting_id).fetch_all(pool).await.map_err(|e|e.to_string())?;
+    let lines=rows.into_iter().map(|(start,end,text)|Line{start,end,text}).collect::<Vec<_>>();
+    Ok(annotate(text,&lines,&turns,&names))
+}
