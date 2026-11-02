@@ -103,7 +103,8 @@
         ],
         "resources": [
             "templates/*.json",
-            "speaker_runtime/*.py"
+            "speaker_runtime/*.py",
+            "context_runtime/*.py"
         ],
         "externalBin": [
             "binaries/llama-helper",

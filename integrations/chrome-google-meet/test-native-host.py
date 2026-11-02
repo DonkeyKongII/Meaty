@@ -39,6 +39,20 @@ class NativeHostTests(unittest.TestCase):
             thread.join(4); server.close()
             self.assertEqual(received, [message])
 
+    def test_configured_custom_app_target(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app = root / 'custom/meetily.app'
+            app.mkdir(parents=True)
+            config = root / 'Library/Application Support/MeetilyMeetingBridge/config.json'
+            config.parent.mkdir(parents=True)
+            config.write_text(json.dumps({'app_path':str(app)}))
+            with patch.object(host.Path, 'home', return_value=root):
+                self.assertEqual(host.app_path(), str(app))
+            config.write_text(json.dumps({'app_path':'relative.app'}))
+            with patch.object(host.Path, 'home', return_value=root):
+                with self.assertRaises(ValueError): host.app_path()
+
     def test_reject_oversized_frame(self):
         with patch.object(host.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(struct.pack('<I', 5000)))):
             with self.assertRaises(ValueError): host.main()

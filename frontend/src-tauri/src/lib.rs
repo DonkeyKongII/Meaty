@@ -54,6 +54,7 @@ pub mod summary;
 pub mod tray;
 mod meeting_autostart;
 mod speakers;
+mod meeting_context;
 pub mod utils;
 pub mod whisper_engine;
 
@@ -616,6 +617,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             speakers::speaker_action,
+            meeting_context::meeting_context_action,
             meeting_autostart::take_meeting_autostart,
             start_recording,
             stop_recording,

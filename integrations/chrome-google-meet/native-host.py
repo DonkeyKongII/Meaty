@@ -11,6 +11,15 @@ def exact_read(count):
         chunks.extend(chunk)
     return bytes(chunks)
 
+def app_path():
+    config = Path.home() / 'Library/Application Support/MeetilyMeetingBridge/config.json'
+    if config.is_file():
+        target = Path(json.loads(config.read_text())['app_path'])
+        if not target.is_absolute() or target.suffix != '.app' or not target.is_dir():
+            raise ValueError('Configured Meetily app does not exist')
+        return str(target)
+    return '/Applications/meetily.app'
+
 def main():
     length = struct.unpack('<I', exact_read(4))[0]
     if length > 4096: raise ValueError('Message too large')
@@ -31,7 +40,7 @@ def main():
                 break
         except (OSError, ValueError):
             if attempt == 0:
-                subprocess.run(['/usr/bin/open', '-g', '/Applications/meetily.app'], check=True, stdout=subprocess.DEVNULL)
+                subprocess.run(['/usr/bin/open', '-g', app_path()], check=True, stdout=subprocess.DEVNULL)
             time.sleep(0.5)
     return result or {'accepted':False, 'error':'Meetily bridge did not become ready'}
 

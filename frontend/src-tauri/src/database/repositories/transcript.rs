@@ -76,6 +76,10 @@ impl TranscriptsRepository {
             meeting_id
         );
 
+        // Queue enrichment only when the complete transcript is committed.
+        sqlx::query("INSERT INTO meeting_context(meeting_id) VALUES(?)")
+            .bind(&meeting_id).execute(&mut *transaction).await?;
+
         // Commit the transaction
         transaction.commit().await?;
 
@@ -98,8 +102,13 @@ impl TranscriptsRepository {
             "SELECT m.id, m.title, t.transcript, t.timestamp
              FROM meetings m
              JOIN transcripts t ON m.id = t.meeting_id
-             WHERE LOWER(t.transcript) LIKE ?",
+             WHERE LOWER(t.transcript) LIKE ?
+             UNION ALL
+             SELECT m.id, m.title, c.search_text, m.created_at
+             FROM meetings m JOIN meeting_context c ON m.id=c.meeting_id
+             WHERE c.search_text LIKE ?",
         )
+        .bind(&search_query)
         .bind(&search_query)
         .fetch_all(pool)
         .await?;
@@ -127,8 +136,10 @@ impl TranscriptsRepository {
 
         match transcript_lower.find(&query_lower) {
             Some(match_index) => {
-                let start_index = match_index.saturating_sub(100);
-                let end_index = (match_index + query.len() + 100).min(transcript.len());
+                let mut start_index = match_index.saturating_sub(100);
+                while !transcript.is_char_boundary(start_index) { start_index -= 1; }
+                let mut end_index = (match_index + query.len() + 100).min(transcript.len());
+                while !transcript.is_char_boundary(end_index) { end_index -= 1; }
 
                 let mut context = String::new();
                 if start_index > 0 {

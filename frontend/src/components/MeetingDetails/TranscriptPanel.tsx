@@ -5,6 +5,7 @@ import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { useMemo, useState } from 'react';
+import { MeetingContextPanel } from './MeetingContextPanel';
 import { SpeakerPanel } from './SpeakerPanel';
 import { SpeakerAnalysis, speakerLabel } from '@/lib/speaker-labels';
 
@@ -83,6 +84,7 @@ export function TranscriptPanel({
         />
       </div>
 
+      {meetingId && !isRecording && <MeetingContextPanel meetingId={meetingId}/>}
       {meetingId && <SpeakerPanel meetingId={meetingId} disabled={isRecording} onChange={setSpeakerData}/>}
 
       {/* Transcript content - use virtualized view for better performance */}

@@ -19,6 +19,7 @@ interface SidebarItem {
 export interface CurrentMeeting {
   id: string;
   title: string;
+  companies?: string[];
 }
 
 // Search result type for transcript search
@@ -98,9 +99,11 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     if (serverAddress) {
       try {
         const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string }>;
+        const contexts = await invoke<Record<string, any>>('meeting_context_action', {request:{action:'list'}});
         const transformedMeetings = meetings.map((meeting: any) => ({
           id: meeting.id,
-          title: meeting.title
+          title: meeting.title,
+          companies: contexts[meeting.id]?.classification === 'internal' ? ['Internal'] : contexts[meeting.id]?.companies?.map((c:any)=>c.name) || []
         }));
         setMeetings(transformedMeetings);
         Analytics.trackBackendConnection(true);
@@ -114,6 +117,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     fetchMeetings();
+    const timer = setInterval(fetchMeetings, 15000);
+    return () => clearInterval(timer);
   }, [serverAddress, fetchMeetings]);
 
   useEffect(() => {
@@ -124,13 +129,21 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     fetchSettings();
   }, []);
 
+  const companyGroups = new Map<string, CurrentMeeting[]>();
+  meetings.forEach(meeting => {
+    const groups = meeting.companies?.length ? meeting.companies : ['Unclassified'];
+    groups.forEach(group => companyGroups.set(group, [...(companyGroups.get(group) || []), meeting]));
+  });
   const baseItems: SidebarItem[] = [
     {
       id: 'meetings',
       title: 'Meeting Notes',
       type: 'folder' as const,
       children: [
-        ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const }))
+        ...Array.from(companyGroups).sort(([a],[b])=>a.localeCompare(b)).map(([company, items]) => ({
+          id: `company:${company}`, title: company, type: 'folder' as const,
+          children: items.map(meeting => ({id:meeting.id,title:meeting.title,type:'file' as const}))
+        }))
       ]
     },
   ];

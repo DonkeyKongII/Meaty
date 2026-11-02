@@ -5,7 +5,7 @@ This companion extension requests local Meetily recording after a visible joined
 ## Current status
 
 - Implemented on branch `feat/meeting-autostart` against upstream commit `07c4dfd`.
-- 10 extension tests and 4 native-host tests pass; frontend TypeScript check passes.
+- 10 extension tests and 5 native-host tests pass; frontend TypeScript check passes.
 - Full macOS release build succeeds with Xcode installed; the app bundle passes `codesign --verify --deep --strict`. Live Google Meet verification is pending replacement of the currently recording app and user loading of the extension.
 - The automation browser policy blocks `chrome://extensions`; the user must load the unpacked extension there manually.
 - Teams web and Zoom web detectors are not included in this first milestone.
@@ -18,7 +18,7 @@ This companion extension requests local Meetily recording after a visible joined
 
 `background.js` checks the extension's enabled setting and deduplicates accepted call sessions. It uses Chrome native messaging with the host `ai.meetily.meeting_autostart`. The native host manifest permits only the extension ID derived from the committed manifest key.
 
-`native-host.py` validates and frames messages, starts `/Applications/meetily.app` if needed, and sends a request over the app's private Unix socket. The socket is mode 0600 and has no TCP port. Native host responses acknowledge the queued request, not successful audio recording. Missing models or denied permissions are displayed by Meetily's existing recording UI.
+`native-host.py` validates and frames messages, starts the explicitly configured custom app if needed (defaults to `/Applications/meetily.app`), and sends a request over the app's private Unix socket. The socket is mode 0600 and has no TCP port. Native host responses acknowledge the queued request, not successful audio recording. Missing models or denied permissions are displayed by Meetily's existing recording UI.
 
 The Rust bridge queues one request and deduplicates sessions for the running app. The mounted frontend consumes requests and uses the existing sidebar recording flow. A manually stopped recording stays stopped for that accepted call session while the app/extension session remains alive. Restarting the app/browser or disabling/re-enabling/reloading the extension can reset this suppression.
 
@@ -71,3 +71,5 @@ Google can change its meeting UI. If detection stops working, update the content
 ## Uninstall companion
 
 Remove the extension in Chrome. Remove the native host manifest at `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/ai.meetily.meeting_autostart.json` and the `~/Library/Application Support/MeetilyMeetingBridge` directory. Your Meetily recordings and settings are separate and should be retained.
+
+To select a custom app outside Applications, run `python3 integrations/chrome-google-meet/install-host.py --app /absolute/path/meetily.app`. The host preserves this target in its local config file.
