@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import { companionOwnsRecording } from '@/lib/meeting-recording';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
@@ -195,8 +196,13 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       if (busy) return;
       busy = true;
       try {
-        const requested = await invoke<boolean>('take_meeting_autostart');
-        if (requested && !isRecording) {
+        const requested = await invoke<string>('take_meeting_autostart');
+        if (requested === 'stop' && companionOwnsRecording() && isRecording) {
+          if (pathname !== '/') router.push('/');
+          else window.dispatchEvent(new CustomEvent('stop-recording-from-meeting'));
+        }
+        if (requested === 'start' && !isRecording) {
+          sessionStorage.setItem('meetilyCompanionStart', 'true');
           if (pathname === '/') {
             window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
           } else {

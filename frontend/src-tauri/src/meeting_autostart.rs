@@ -1,11 +1,16 @@
 //! Local-only bridge for the Chrome Google Meet companion extension.
 use std::sync::Mutex;
-static PENDING: Mutex<bool> = Mutex::new(false);
+#[path = "meeting_session.rs"]
+mod meeting_session;
+static STATE: Mutex<Option<meeting_session::Sessions>> = Mutex::new(None);
 
 #[tauri::command]
-pub fn take_meeting_autostart() -> bool {
-    let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
-    std::mem::take(&mut *pending)
+pub fn take_meeting_autostart() -> String {
+    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    state
+        .get_or_insert_with(Default::default)
+        .action(std::time::Instant::now())
+        .into()
 }
 
 #[cfg(target_os = "macos")]
@@ -13,7 +18,6 @@ pub fn start<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::{
-        collections::HashSet,
         io::{BufRead, BufReader, Write},
         os::unix::{fs::PermissionsExt, net::UnixListener},
         time::Duration,
@@ -32,7 +36,6 @@ pub fn start<R: tauri::Runtime>(
     let listener = UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     std::thread::spawn(move || {
-        let mut seen = HashSet::new();
         for connection in listener.incoming() {
             let Ok(mut stream) = connection else { continue };
             let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
@@ -46,22 +49,19 @@ pub fn start<R: tauri::Runtime>(
                         let Some(session) = message["session"].as_str() else {
                             return false;
                         };
-                        if message["event"] != "joined"
+                        if (message["event"] != "joined" && message["event"] != "ended")
                             || message["provider"] != "google-meet"
                             || session.is_empty()
                             || session.len() > 128
                         {
                             return false;
                         }
-                        if seen.contains(session) {
-                            return true;
-                        }
-                        // Bound retained IDs for long-running tray sessions.
-                        if seen.len() >= 10000 {
-                            seen.clear();
-                        }
-                        seen.insert(session.to_owned());
-                        *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = true;
+                        let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+                        state.get_or_insert_with(Default::default).update(
+                            session,
+                            message["event"] == "joined",
+                            std::time::Instant::now(),
+                        );
                         true
                     });
             let _ = writeln!(stream, "{{\"accepted\":{accepted}}}");

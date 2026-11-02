@@ -1,5 +1,6 @@
 'use client';
 
+import { clearCompanionRecording } from '@/lib/meeting-recording';
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { recordingService } from '@/services/recordingService';
 import { toast } from 'sonner';
@@ -163,6 +164,7 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
 
         // Recording stopped
         const unlistenStopped = await recordingService.onRecordingStopped((payload) => {
+          clearCompanionRecording();
           console.log('[RecordingStateContext] Recording stopped event:', payload);
           setState(prev => {
             // Set status to STOPPING if not already in stop flow

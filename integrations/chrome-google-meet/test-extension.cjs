@@ -48,18 +48,19 @@ test('brief UI disappearance preserves session; leaving then rejoining creates a
   f.setLabel('Join now');await f.tick();await f.tick(6000);f.setLabel('Leave call');await f.tick();assert.notEqual(f.sent.at(-1).session,first);
 });
 function worker({enabled=true, fail=false}={}) {
-  let listener, calls=0;
+  let listener, removed, updated, calls=0;
+  const messages=[];
   const local={enabled}, session={};
   const storage=data=>({
     async get(key) { if(key===null)return {...data}; return {[key]:data[key]}; },
     async set(values){Object.assign(data,values);}, async remove(keys){keys.forEach(key=>delete data[key]);},
   });
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'background.js'),'utf8'),{
-    chrome:{runtime:{onMessage:{addListener:fn=>listener=fn},async sendNativeMessage(){calls++;if(fail)throw Error('Host unavailable');return {accepted:true};}},
-      storage:{local:storage(local),session:storage(session)},tabs:{onRemoved:{addListener(){}}}},
+    chrome:{runtime:{onMessage:{addListener:fn=>listener=fn},async sendNativeMessage(host,message){calls++;messages.push(message);if(fail)throw Error('Host unavailable');return {accepted:true};}},
+      storage:{local:storage(local),session:storage(session)},tabs:{onRemoved:{addListener:fn=>removed=fn},onUpdated:{addListener:fn=>updated=fn}}},
   });
-  return {get calls(){return calls;},setFail(value){fail=value;},send(sender={tab:{id:1},url:'https://meet.google.com/abc-defg-hij'}) {
-    return new Promise(resolve=>{const result=listener({event:'joined',provider:'google-meet',session:'same-call'},sender,resolve);if(!result)resolve(undefined);});
+  return {messages, close: id=>removed(id), navigate: (id,url)=>updated(id,{url}), get calls(){return calls;},setFail(value){fail=value;},send(sender={tab:{id:1},url:'https://meet.google.com/abc-defg-hij'},event='joined') {
+    return new Promise(resolve=>{const result=listener({event,provider:'google-meet',session:'same-call'},sender,resolve);if(!result)resolve(undefined);});
   }};
 }
 test('worker sends an accepted session to native host only once',async()=>{
@@ -73,4 +74,26 @@ test('native failures can retry rather than poisoning session deduplication',asy
 });
 test('worker rejects messages from other origins',async()=>{
  const w=worker();assert.equal(await w.send({tab:{id:1},url:'https://example.com/'}),undefined);assert.equal(w.calls,0);
+});
+
+test('leaving sends ended with the original call session',async()=>{
+ const f=fixture({label:'Leave call'});await f.tick();const session=f.sent[0].session;
+ f.setLabel('Rejoin');await f.tick();assert.equal(f.sent.at(-1).event,'ended');assert.equal(f.sent.at(-1).session,session);
+});
+test('closing a joined tab delivers end and clears deduplication',async()=>{
+ const w=worker();await w.send();await w.close(1);
+ assert.equal(w.messages.at(-1).event,'ended');await w.send();assert.equal(w.calls,3);
+});
+test('ended then same-session reconnect is forwarded to cancel grace',async()=>{
+ const w=worker();await w.send();await w.send(undefined,'ended');await w.send();
+ assert.deepEqual(w.messages.map(m=>m.event),['joined','ended','joined']);
+});
+test('closing an unrelated tab does not end the active meeting',async()=>{
+ const w=worker();await w.send();await w.close(2);assert.equal(w.calls,1);
+});
+
+test('duplicated tabs receive distinct native session identities',async()=>{
+ const w=worker();await w.send();await w.send({tab:{id:2},url:'https://meet.google.com/abc-defg-hij'});
+ assert.notEqual(w.messages[0].session,w.messages[1].session);
+ await w.close(1);assert.equal(w.messages.at(-1).session,w.messages[0].session);
 });

@@ -17,9 +17,16 @@
     if (running) return;
     if (!joined()) {
       absentSince ??= Date.now();
-      if (Date.now() - absentSince > 5000) {
-        session = null;
-        sessionStorage.removeItem(storageKey);
+      if (session) {
+        running = true;
+        try {
+          const result = await chrome.runtime.sendMessage({event:'ended', provider:'google-meet', session});
+          if (result?.accepted && Date.now() - absentSince > 5000) {
+            session = null;
+            sessionStorage.removeItem(storageKey);
+          }
+        } catch (error) { console.debug('Meetily end notification unavailable:', error.message); }
+        finally { running = false; }
       }
       return;
     }

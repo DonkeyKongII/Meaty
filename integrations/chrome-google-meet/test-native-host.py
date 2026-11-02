@@ -39,6 +39,11 @@ class NativeHostTests(unittest.TestCase):
             thread.join(4); server.close()
             self.assertEqual(received, [message])
 
+    def test_end_does_not_launch_closed_app(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(host.Path, 'home', return_value=Path(temp)), patch.object(host.subprocess, 'run') as launch, self.input({'event':'ended','provider':'google-meet','session':'old'}):
+            self.assertFalse(host.main()['accepted'])
+            launch.assert_not_called()
+
     def test_configured_custom_app_target(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

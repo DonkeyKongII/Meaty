@@ -1,10 +1,10 @@
+import { consumeCompanionStart, startWithOwnership } from '@/lib/meeting-recording';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
-import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import {
@@ -157,7 +157,7 @@ export function useRecordingStart(
 
       // Start the actual backend recording
       console.log('Starting backend recording with meeting:', randomTitle);
-      await recordingService.startRecordingWithDevices(
+      await startWithOwnership(false,
         selectedDevices?.micDevice || null,
         selectedDevices?.systemDevice || null,
         randomTitle
@@ -216,6 +216,7 @@ export function useRecordingStart(
           console.log('Auto-starting recording from navigation...');
           setIsAutoStarting(true);
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
+          const companion = consumeCompanionStart();
 
           // Check the selected transcription model before starting.
           const modelReady = await checkModelReady();
@@ -249,7 +250,7 @@ export function useRecordingStart(
             setStatus(RecordingStatus.STARTING, 'Initializing recording...');
 
             console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
-            const result = await recordingService.startRecordingWithDevices(
+            const result = await startWithOwnership(companion,
               selectedDevices?.micDevice || null,
               selectedDevices?.systemDevice || null,
               generatedMeetingTitle
@@ -313,6 +314,7 @@ export function useRecordingStart(
         return;
       }
 
+      const companion = consumeCompanionStart();
       console.log('Direct start from sidebar - checking selected transcription model status');
       setIsAutoStarting(true);
 
@@ -347,7 +349,7 @@ export function useRecordingStart(
         setStatus(RecordingStatus.STARTING, 'Initializing recording...');
 
         console.log('Starting backend recording with meeting:', generatedMeetingTitle);
-        const result = await recordingService.startRecordingWithDevices(
+        const result = await startWithOwnership(companion,
           selectedDevices?.micDevice || null,
           selectedDevices?.systemDevice || null,
           generatedMeetingTitle

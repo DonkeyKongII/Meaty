@@ -1,5 +1,6 @@
 'use client';
 
+import { companionOwnsRecording } from '@/lib/meeting-recording';
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
 import { useCallback, useEffect, useState, useRef } from 'react';
@@ -202,6 +203,14 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     // Immediately trigger the stop action
     await stopRecordingAction();
   }, [isRecording, isStarting, isStopping, isStartingRecording, stopRecordingAction, onStopInitiated]);
+
+  useEffect(() => {
+    const stopFromMeeting = () => {
+      if (companionOwnsRecording()) void handleStopRecording();
+    };
+    window.addEventListener('stop-recording-from-meeting', stopFromMeeting);
+    return () => window.removeEventListener('stop-recording-from-meeting', stopFromMeeting);
+  }, [handleStopRecording]);
 
   const handlePauseRecording = useCallback(async () => {
     if (!isRecording || isPaused || isPausing) return;

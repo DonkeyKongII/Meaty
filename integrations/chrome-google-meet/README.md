@@ -5,11 +5,11 @@ This companion extension requests local Meetily recording after a visible joined
 ## Current status
 
 - Implemented on branch `feat/meeting-autostart` against upstream commit `07c4dfd`.
-- 11 extension tests and 5 native-host tests pass; frontend TypeScript check passes.
-- Full macOS release build succeeds with Xcode installed; the app bundle passes `codesign --verify --deep --strict`. Live Google Meet verification is pending replacement of the currently recording app and user loading of the extension.
+- 16 extension tests and 6 native-host tests pass; frontend TypeScript check passes.
+- Full macOS release build succeeds with Xcode installed; the app bundle passes `codesign --verify --deep --strict`. Google Meet auto-start was verified live. Auto-stop requires both the updated app and extension 0.2.0.
 - The automation browser policy blocks `chrome://extensions`; the user must load the unpacked extension there manually.
 - Teams web and Zoom web detectors are not included in this first milestone.
-- Stopping recording is manual in Meetily. Leaving a call does not stop recording.
+- Version 0.2.0 stops companion-started recordings after leaving/ending the call or closing its tab, following an eight-second reconnect grace period. With multiple joined tabs, the last one must end. Manually started recordings are left alone.
 - Chrome's extension switch disables future automatic starts; it does not stop an existing recording.
 
 ## Architecture
@@ -20,7 +20,7 @@ This companion extension requests local Meetily recording after a visible joined
 
 `native-host.py` validates and frames messages, starts the explicitly configured custom app if needed (defaults to `/Applications/meetily.app`), and sends a request over the app's private Unix socket. The socket is mode 0600 and has no TCP port. Native host responses acknowledge the queued request, not successful audio recording. Missing models or denied permissions are displayed by Meetily's existing recording UI.
 
-The Rust bridge queues one request and deduplicates sessions for the running app. The mounted frontend consumes requests and uses the existing sidebar recording flow. A manually stopped recording stays stopped for that accepted call session while the app/extension session remains alive. Restarting the app/browser or disabling/re-enabling/reloading the extension can reset this suppression.
+The Rust bridge tracks joined call sessions and queues start/stop actions. End notifications cancel pending starts; stopping waits eight seconds after the last active call ends. A reconnect cancels that stop. The frontend marks ownership only after a companion start succeeds and clears it on the recording-stopped event, then routes automatic stops through the normal Stop button save flow. The mounted frontend consumes requests and uses the existing sidebar recording flow. A manually stopped recording stays stopped for that accepted call session while the app/extension session remains alive. Restarting the app/browser or disabling/re-enabling/reloading the extension can reset this suppression.
 
 ## Build prerequisites
 
@@ -53,7 +53,7 @@ The custom build disables official updater endpoints and updater artifact signin
 3. In Chrome, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this directory. Keep the directory in place. The extension's fixed ID is in `extension-id.txt`.
 4. Open the extension popup. The **Record when I join Google Meet** switch defaults to enabled. Reload any Google Meet tabs that were already open before installation.
 5. Join a test call and check Meetily's recording indicator. macOS may require renewed microphone and system-audio permissions for the custom build.
-6. Stop recording manually in Meetily when finished.
+6. Leave the call or close its tab. After about eight seconds, verify Meetily stops and saves through its normal workflow. Manual stopping remains available.
 
 ## Validation
 
@@ -64,7 +64,7 @@ cd frontend
 npx --yes pnpm@9.15.9 exec tsc --noEmit
 ```
 
-Live acceptance checks: pre-join does not start recording; joining starts exactly one recording; muting does not restart/stop it; manually stopping does not restart it on heartbeat or page reload; leaving and rejoining starts a new recording when idle; disabled extension does not launch/start Meetily; app closed at join launches it; missing model and denied audio permissions display actionable errors.
+Live acceptance checks: pre-join does not start recording; joining starts exactly one recording; muting does not restart/stop it; leaving/ending or closing the last call tab stops and saves; a brief reconnect does not stop; a manually started recording is not stopped by a meeting end; manually stopping does not restart it on heartbeat or page reload; leaving and rejoining starts a new recording when idle; disabled extension does not launch/start Meetily; app closed at join launches it; missing model and denied audio permissions display actionable errors.
 
 Google can change its meeting UI. If detection stops working, update the content detector and verify against a live test meeting.
 
