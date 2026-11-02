@@ -25,12 +25,20 @@ def normalize(data, settings):
     internal = set(settings.get('internal_domains', DEFAULT_DOMAINS))
     external = [d for d in domains if d not in internal]
     # Missing emails prevent a definitive Internal classification.
-    known = bool(people) and all(p['email'] for p in people)
+    known = bool(people) and all(p['email'] for p in people) and not data.get('unresolved_source_roster',False)
     classification = 'internal' if known and not external else ('external' if external else 'unknown')
     companies = [{'domain': d, 'name': settings.get('company_names', {}).get(d, d)} for d in external if d not in PERSONAL_DOMAINS]
     if any(d in PERSONAL_DOMAINS for d in external):
         classification = 'unknown' if not companies else 'external'
-    result = {**data, 'participants': people, 'classification': classification, 'companies': companies}
+    manual = data.get('manual_companies', [])
+    if not isinstance(manual, list) or any(not isinstance(v, str) for v in manual):
+        raise ValueError('Company names must be a list of names')
+    manual = list(dict.fromkeys(v.strip() for v in manual if v.strip()))
+    if len(manual)>20 or any(len(v)>200 for v in manual): raise ValueError('Enter up to 20 company names, each up to 200 characters')
+    if manual:
+        companies = [{'domain':'', 'name':v} for v in manual]
+        classification = 'internal' if len(manual)==1 and manual[0].casefold()=='internal' else 'external'
+    result = {**data, 'manual_companies':manual, 'participants': people, 'classification': classification, 'companies': companies}
     result['calendar_title'] = str(data.get('calendar_title', ''))[:500]
     # Invitees do not establish the number of voices in the recording.
     result['expected_participants'] = len(people)
@@ -63,6 +71,11 @@ def run(db, request):
         return settings
     if action == 'list':
         return {r['meeting_id']: {**json.loads(r['data']), 'status': r['status']} for r in db.execute('SELECT * FROM meeting_context')}
+    if action == 'combine':
+        from combine import combine
+        return combine(db, request, normalize, settings, search_text)
+    if action == 'candidates':
+        return [dict(r) for r in db.execute('SELECT m.id,m.title,m.created_at,m.folder_path FROM meetings m WHERE EXISTS(SELECT 1 FROM transcripts t WHERE t.meeting_id=m.id) ORDER BY m.created_at')]
     if action == 'pending':
         return [dict(r) for r in db.execute("SELECT m.id,m.title,m.created_at,m.folder_path,c.status FROM meeting_context c JOIN meetings m ON m.id=c.meeting_id WHERE c.status='pending' ORDER BY m.created_at LIMIT 10")]
     if not db.execute('SELECT 1 FROM meetings WHERE id=?', (mid,)).fetchone():
@@ -75,7 +88,12 @@ def run(db, request):
     if action == 'queue':
         db.execute("INSERT INTO meeting_context(meeting_id) VALUES(?) ON CONFLICT(meeting_id) DO UPDATE SET status='pending'", (mid,))
     elif action == 'save':
-        data = normalize(request['data'], settings)
+        proposed = dict(request['data'])
+        # Calendar enrichment must preserve a manual company override unless explicitly edited.
+        previous = json.loads(row['data']) if row else {}
+        if 'manual_companies' not in proposed and 'manual_companies' in previous:
+            proposed['manual_companies'] = previous['manual_companies']
+        data = normalize(proposed, settings)
         status = request.get('status', 'complete')
         if status not in ('complete', 'needs_review'):
             raise ValueError('Invalid completion status')

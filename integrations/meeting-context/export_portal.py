@@ -45,9 +45,9 @@ def export(db_path, meeting_ids=None):
             context=json.loads(context[0]) if context else {}
             # The recording folder suffix is UTC start; creation time is save time.
             match=re.search(r'_(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})$',m.get('folder_path') or '')
-            started=f'{match[1]}T{match[2]}:{match[3]}:00+00:00' if match else context.get('calendar_source',{}).get('start') or m['created_at']
+            started=f'{match[1]}T{match[2]}:{match[3]}:00+00:00' if match else context.get('recording_started_at') or context.get('calendar_source',{}).get('start') or m['created_at']
             fingerprint=hashlib.sha256(json.dumps(segments,sort_keys=True).encode()).hexdigest()
-            meetings.append({'id':mid,'title':title,'started_at':started,'notes':markdown,'transcript':transcript,'participants':context.get('participants',[]),'companies':['Internal'] if context.get('classification')=='internal' else [c['name'] for c in context.get('companies',[])], 'provenance':{'service':'meetily','saved_at':m['created_at'],'transcript_hash':fingerprint,'calendar':context.get('calendar_source')}})
+            meetings.append({'id':mid,'title':title,'started_at':started,'notes':markdown,'transcript':transcript,'participants':context.get('participants',[]),'companies':['Internal'] if context.get('classification')=='internal' else [c['name'] for c in context.get('companies',[])], 'provenance':{'service':'meetily','saved_at':m['created_at'],'transcript_hash':fingerprint,'calendar':context.get('calendar_source'),'combined_from':context.get('combined_from',[])}})
         return {'meetings':meetings,'tasks':[],'pending_summaries':pending}
 
 if __name__=='__main__':

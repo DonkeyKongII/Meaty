@@ -3,10 +3,11 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 
-type Context = { classification: string; companies: {domain:string;name:string}[]; participants: {name:string;email:string;attendance:string}[]; status:string; calendar_title?:string; notes?:string; identity_suggestions?:{name:string;start?:number;reason:string}[] };
+type Context = { manual_companies?:string[]; classification: string; companies: {domain:string;name:string}[]; participants: {name:string;email:string;attendance:string}[]; status:string; calendar_title?:string; notes?:string; identity_suggestions?:{name:string;start?:number;reason:string}[] };
 export function MeetingContextPanel({meetingId}: {meetingId:string}) {
   const [data,setData] = useState<Context|null>(null);
   const [editing,setEditing] = useState(false);
+  const [company,setCompany] = useState('');
   const [people,setPeople] = useState('');
   const [domains,setDomains] = useState('');
   const [aliases,setAliases] = useState('');
@@ -26,6 +27,7 @@ export function MeetingContextPanel({meetingId}: {meetingId:string}) {
       const settings=await call({action:'settings'});
       setDomains(settings.internal_domains.join(', '));
       setAliases(Object.entries(settings.company_names).map(([d,n])=>`${d} = ${n}`).join('\n'));
+      setCompany(data?.manual_companies?.join('\n')||'');
       setPeople(data?.participants.map(p=>`${p.name} <${p.email}>${p.attendance==='confirmed'?' confirmed':''}`).join('\n')??'');
       setEditing(true);
     } catch(e){setError(String(e));}
@@ -40,7 +42,7 @@ export function MeetingContextPanel({meetingId}: {meetingId:string}) {
         return {name:match[1],email:match[2],attendance:match[3]?'confirmed':'invited'};
       });
       await call({action:'settings',data:{internal_domains:domains.split(',').map(d=>d.trim()).filter(Boolean),company_names}});
-      setData(await call({action:'save',meeting_id:meetingId,data:{...data,participants}}));
+      setData(await call({action:'save',meeting_id:meetingId,data:{...data,participants,manual_companies:company.split('\n').map(v=>v.trim()).filter(Boolean)}}));
       setEditing(false);await refetchMeetings();
     }catch(e){setError(String(e));}finally{setBusy(false);}
   }
@@ -56,6 +58,7 @@ export function MeetingContextPanel({meetingId}: {meetingId:string}) {
     </div></details>
     <div className="flex gap-3 text-xs text-gray-500"><span>Calendar enrichment: {data?.status?.replaceAll('_',' ')||'loading'}</span><button disabled={busy} onClick={queue} className="text-blue-600">Request calendar lookup</button></div>
     {editing&&<div className="space-y-2 max-h-64 overflow-y-auto">
+      <label className="block">Company for this meeting<textarea aria-label="Company for this meeting" className="border rounded w-full p-2" rows={2} value={company} onChange={e=>setCompany(e.target.value)} placeholder="Company name, or Internal"/><span className="text-xs text-gray-500">One company per line. Enter Internal for an internal meeting. Leave blank to use email domains automatically.</span></label>
       <label className="block">Participants — one Name &lt;email&gt; per line; add “confirmed” for known attendees<textarea className="border rounded w-full p-2" rows={5} value={people} onChange={e=>setPeople(e.target.value)}/></label>
       <label className="block">Internal email domains<input className="border rounded w-full p-2" value={domains} onChange={e=>setDomains(e.target.value)}/></label>
       <label className="block">Company names — domain = Company Name<textarea className="border rounded w-full p-2" rows={3} value={aliases} onChange={e=>setAliases(e.target.value)}/></label>

@@ -38,4 +38,15 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(c.run(self.db,{'action':'list'}),{})
     def test_unknown_meeting_rejected(self):
         with self.assertRaises(ValueError):c.run(self.db,{'action':'save','meeting_id':'no','data':{}})
+    def test_manual_company_survives_calendar_enrichment_and_settings(self):
+        c.run(self.db,{'action':'save','meeting_id':'m','data':{'manual_companies':['Snowflake']}})
+        c.run(self.db,{'action':'save','meeting_id':'m','data':self.people('a@hunters.ai')})
+        c.run(self.db,{'action':'settings','data':self.settings})
+        data=c.run(self.db,{'action':'get','meeting_id':'m'})
+        self.assertEqual(data['companies'],[{'domain':'','name':'Snowflake'}]);self.assertEqual(data['classification'],'external')
+        c.run(self.db,{'action':'save','meeting_id':'m','data':{**data,'manual_companies':[]}})
+        self.assertEqual(c.run(self.db,{'action':'get','meeting_id':'m'})['classification'],'internal')
+    def test_manual_internal_without_invented_participants(self):
+        data=c.normalize({'manual_companies':['Internal']},self.settings)
+        self.assertEqual(data['classification'],'internal');self.assertEqual(data['expected_participants'],0)
 if __name__=='__main__':unittest.main()
