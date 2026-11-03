@@ -13,6 +13,8 @@ import { TranscriptSegmentData } from "@/types";
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
     segments: TranscriptSegmentData[];
+    speakerTags?: Record<string,{id:string;name:string}[]>;
+    onAssignSpeaker?: (target:{id:string;name:string})=>void;
     speakerLabels?: Record<string, string|undefined>;
     /** Whether recording is in progress */
     isRecording?: boolean;
@@ -73,7 +75,11 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming,
     showConfidence,
     speakerLabel,
+    speakerTags,
+    onAssignSpeaker,
 }: {
+    speakerTags?: {id:string;name:string}[];
+    onAssignSpeaker?: (target:{id:string;name:string})=>void;
     speakerLabel?: string;
     id: string;
     timestamp: number;
@@ -85,10 +91,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div id={`segment-${id}`} className="meaty-transcript-segment mb-3">
             <div className="flex items-start gap-2">
                 <Tooltip>
-                    <TooltipTrigger>
+                    <TooltipTrigger data-meaty-timestamp>
                         <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
                             {formatRecordingTime(timestamp)}
                         </span>
@@ -100,7 +106,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     </TooltipContent>
                 </Tooltip>
                 <div className="flex-1">
-                    {speakerLabel && <div className="text-xs font-semibold text-blue-700 mb-1">{speakerLabel}</div>}
+                    {speakerTags&&onAssignSpeaker?<div className="mb-1 flex flex-wrap gap-2">{speakerTags.map((tag,i)=><button type="button" key={`${tag.id}:${i}`} data-meaty-speaker className="text-xs font-semibold text-blue-700" onClick={()=>onAssignSpeaker(tag)} aria-label={`Assign ${tag.name}`}>{tag.name}</button>)}</div>:speakerLabel && <div className="text-xs font-semibold text-blue-700 mb-1">{speakerLabel}</div>}
                     {isStreaming ? (
                         <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
                             <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
@@ -117,6 +123,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
 export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
     segments,
     speakerLabels,
+    speakerTags,
+    onAssignSpeaker,
     isRecording = false,
     isPaused = false,
     isProcessing = false,
@@ -262,8 +270,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         </>
                     ) : (
                         <>
-                            <p className="text-lg font-semibold">Welcome to meetily!</p>
-                            <p className="text-xs mt-1">Start recording to see live transcription</p>
+                            <div className="meaty-welcome"><img src="/meaty-mark.png" alt="MEATY ham logo" width="112" height="112"/><p className="meaty-eyebrow">LESS NOISE. MORE SUBSTANCE.</p><h1>Get to the meat of it.</h1><p>Record a conversation. Leave with the good stuff.</p><div className="meaty-welcome-steps"><span>01 / RECORD</span><span>02 / MAKE SENSE</span><span>03 / TAKE ACTION</span></div></div>
+                            <p className="text-xs mt-5">Use the record button below to get started.</p>
                         </>
                     )}
                 </motion.div>
@@ -299,6 +307,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         speakerLabel={speakerLabels?.[segment.id]}
+                                        speakerTags={speakerTags?.[segment.id]}
+                                        onAssignSpeaker={onAssignSpeaker}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
@@ -356,6 +366,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         speakerLabel={speakerLabels?.[segment.id]}
+                                        speakerTags={speakerTags?.[segment.id]}
+                                        onAssignSpeaker={onAssignSpeaker}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}

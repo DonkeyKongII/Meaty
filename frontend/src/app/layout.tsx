@@ -1,6 +1,7 @@
 'use client'
 
 import './globals.css'
+import './meaty.css'
 import { Source_Sans_3 } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
@@ -232,7 +233,7 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${sourceSans3.variable} font-sans antialiased`}>
+      <body className={`${sourceSans3.variable} font-sans antialiased meaty-ui`}>
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>

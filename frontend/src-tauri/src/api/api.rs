@@ -934,6 +934,7 @@ pub async fn api_save_transcript<R: Runtime>(
     transcripts: Vec<serde_json::Value>,
     folder_path: Option<String>,
     auth_token: Option<String>,
+    auto_summary: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
         "api_save_transcript called for meeting: {}, transcripts: {}, folder_path: {:?}, auth_token: {}",
@@ -982,6 +983,11 @@ pub async fn api_save_transcript<R: Runtime>(
     .await
     {
         Ok(meeting_id) => {
+            let count=crate::meeting_autostart::finish_sampling();
+            crate::meeting_pipeline::enqueue(&_app,&meeting_id,auto_summary.unwrap_or(false)).await?;
+            if let Err(e)=crate::speakers::enqueue(&_app, &meeting_id, count).await {
+                log::error!("Could not queue speaker analysis: {e}");
+            }
             log_info!(
                 "Successfully saved transcript and created meeting with id: {}",
                 meeting_id

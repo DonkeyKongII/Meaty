@@ -54,6 +54,7 @@ pub mod summary;
 pub mod tray;
 mod meeting_autostart;
 mod speakers;
+mod meeting_pipeline;
 mod meeting_context;
 pub mod utils;
 pub mod whisper_engine;
@@ -507,6 +508,8 @@ pub fn run() {
                 )),
             };
 
+            speakers::start_background(_app.handle().clone());
+            meeting_pipeline::start(_app.handle().clone());
             log::info!("Application setup complete");
 
             #[cfg(target_os = "macos")]
@@ -617,6 +620,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             speakers::speaker_action,
+            meeting_pipeline::meeting_pipeline_status,
             meeting_context::meeting_context_action,
             meeting_autostart::take_meeting_autostart,
             start_recording,

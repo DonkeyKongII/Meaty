@@ -467,6 +467,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         info!("✅ Transcript-update event listener registered for history persistence");
     }
 
+    crate::meeting_autostart::begin_sampling();
     // Emit success event
     app.emit("recording-started", serde_json::json!({
         "message": "Recording started successfully with parallel processing",
@@ -654,6 +655,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         info!("✅ Transcript-update event listener registered for history persistence");
     }
 
+    crate::meeting_autostart::begin_sampling();
     // Emit success event
     app.emit("recording-started", serde_json::json!({
         "message": "Recording started with custom devices and parallel processing",

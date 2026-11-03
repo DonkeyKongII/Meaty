@@ -45,6 +45,7 @@ export class StorageService {
       meetingTitle,
       transcripts,
       folderPath,
+      autoSummary: localStorage.getItem('isAutoSummary') === 'true',
     });
   }
 

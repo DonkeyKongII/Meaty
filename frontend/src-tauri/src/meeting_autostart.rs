@@ -2,6 +2,11 @@
 use std::sync::Mutex;
 #[path = "meeting_session.rs"]
 mod meeting_session;
+#[path = "participant_counts.rs"]
+mod participant_counts;
+static COUNTS: std::sync::LazyLock<Mutex<participant_counts::Counts>> = std::sync::LazyLock::new(Default::default);
+pub fn begin_sampling() {COUNTS.lock().unwrap_or_else(|e|e.into_inner()).begin(std::time::Instant::now());}
+pub fn finish_sampling() -> Option<u64> {COUNTS.lock().unwrap_or_else(|e|e.into_inner()).finish()}
 static STATE: Mutex<Option<meeting_session::Sessions>> = Mutex::new(None);
 
 #[tauri::command]
@@ -49,13 +54,21 @@ pub fn start<R: tauri::Runtime>(
                         let Some(session) = message["session"].as_str() else {
                             return false;
                         };
-                        if (message["event"] != "joined" && message["event"] != "ended")
+                        if (message["event"] != "joined" && message["event"] != "ended" && message["event"] != "participants")
                             || message["provider"] != "google-meet"
                             || session.is_empty()
                             || session.len() > 128
                         {
                             return false;
                         }
+                        {
+                            let mut c=COUNTS.lock().unwrap_or_else(|e|e.into_inner());
+                            if message["event"] == "ended" {c.end_session(session);}
+                            else if let Some(count)=message["participant_count"].as_u64().filter(|n| (1..=100).contains(n)) {
+                                c.observe(session,count,std::time::Instant::now());
+                            }
+                        }
+                        if message["event"] == "participants" {return true;}
                         let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
                         state.get_or_insert_with(Default::default).update(
                             session,

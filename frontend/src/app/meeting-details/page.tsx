@@ -64,59 +64,7 @@ function MeetingDetailsContent() {
   }, []);
 
   // Set up auto-generation - respects DB as source of truth
-  const setupAutoGeneration = useCallback(async () => {
-    if (hasCheckedAutoGen) return; // Only check once
-
-    // Only auto-generate if navigated from recording
-    if (source !== 'recording') {
-      console.log('Not from recording navigation, skipping auto-generation');
-      setHasCheckedAutoGen(true);
-      return;
-    }
-
-    // Respect user's auto-summary toggle preference
-    if (!isAutoSummary) {
-      console.log('Auto-summary is disabled in settings');
-      setHasCheckedAutoGen(true);
-      return;
-    }
-
-    try {
-      // Check what's currently in database
-      const currentConfig = await invoke('api_get_model_config') as any;
-
-      // If DB already has a model, use it (never override!)
-      if (currentConfig && currentConfig.model) {
-        console.log('Using existing model from DB:', currentConfig.model);
-        setShouldAutoGenerate(true);
-        setHasCheckedAutoGen(true);
-        return;
-      }
-
-      // DB is empty - check if gemma3:1b exists as fallback
-      const hasGemma = await checkForGemmaModel();
-
-      if (hasGemma) {
-        console.log('💾 DB empty, using gemma3:1b as initial default');
-
-        await invoke('api_save_model_config', {
-          provider: 'ollama',
-          model: 'gemma3:1b',
-          whisperModel: 'large-v3',
-          apiKey: null,
-          ollamaEndpoint: null,
-        });
-
-        setShouldAutoGenerate(true);
-      } else {
-        console.log('⚠️ No model configured and gemma3:1b not found');
-      }
-    } catch (error) {
-      console.error('❌ Failed to setup auto-generation:', error);
-    }
-
-    setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
+  const setupAutoGeneration = useCallback(async () => {setHasCheckedAutoGen(true);},[]);
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
@@ -194,12 +142,14 @@ function MeetingDetailsContent() {
     setIsLoading(true);
 
     let cancelled = false;
+    let backgroundDone=false;
     const fetchMeetingSummary = async () => {
       try {
         const response = await invoke<SummaryProcessResponse>('api_get_summary', {
           meetingId,
         });
         if (cancelled) return;
+        if(['completed','error','failed','cancelled'].includes(response.status)||(response.start&&['processing','pending'].includes(response.status)))backgroundDone=true;
         setSummaryResponse(response);
         const summary = parseSummaryContent(response.data);
         setMeetingSummary(response.status === 'idle' ? null : summary);
@@ -219,7 +169,13 @@ function MeetingDetailsContent() {
     };
 
     loadData();
-    return () => { cancelled = true; };
+    const timer=setInterval(async()=>{
+      if(backgroundDone)return;
+      try {const pipeline=await invoke<{status:string}>('meeting_pipeline_status',{meetingId});
+        if(pipeline.status==='waiting'||pipeline.status==='started') await fetchMeetingSummary();
+      }catch{}
+    },5000);
+    return () => { cancelled = true;clearInterval(timer); };
   }, [meetingId]);
 
   // Auto-generation check: runs when meeting is loaded with no summary

@@ -30,7 +30,7 @@ export function CombineMeetingsPanel({meetingId}:{meetingId:string}) {
     }catch(e){setError(String(e));}finally{setBusy(false);}
   }
   return <div className="border-b p-3 text-sm">
-    <button disabled={disabled||busy} className="text-blue-600 disabled:text-gray-400" onClick={show}>Combine meetings…</button>
+    <button disabled={disabled||busy} className="meaty-action text-blue-600 disabled:text-gray-400" onClick={show}>Combine meetings…</button>
     {disabled&&<span className="ml-2 text-xs text-gray-500">Available after recording finishes</span>}
     {open&&<div role="dialog" aria-modal="true" aria-label="Combine meetings" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
       <div className="w-full max-w-xl max-h-[85vh] overflow-y-auto rounded-xl bg-white p-5 shadow-xl space-y-4">
@@ -45,7 +45,7 @@ export function CombineMeetingsPanel({meetingId}:{meetingId:string}) {
         </fieldset>
         <p className="text-xs text-gray-500">Recordings play back to back, without the gap between calls. Generate a new summary and detect speakers for the combined recording. Existing voice profiles remain saved.</p>
         {error&&<p role="alert" className="text-red-700">{error}</p>}
-        <div className="flex gap-4"><button className="rounded bg-blue-600 px-3 py-2 text-white disabled:opacity-50" disabled={busy||disabled||selected.length<2||selected.length>10||!title.trim()} onClick={combine}>{busy?'Combining locally…':'Create combined meeting'}</button><button disabled={busy} onClick={()=>setOpen(false)}>Cancel</button></div>
+        <div className="flex gap-4"><button className="rounded bg-blue-600 px-3 py-2 text-white disabled:opacity-50" disabled={busy||disabled||selected.length<2||selected.length>10||!title.trim()} onClick={combine}>{busy?'Combining locally…':'Create combined meeting'}</button><button className="meaty-action" disabled={busy} onClick={()=>setOpen(false)}>Cancel</button></div>
       </div>
     </div>}
     {!open&&error&&<p role="alert" className="text-red-700">{error}</p>}

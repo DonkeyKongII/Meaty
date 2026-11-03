@@ -24,8 +24,10 @@ def main():
     length = struct.unpack('<I', exact_read(4))[0]
     if length > 4096: raise ValueError('Message too large')
     message = json.loads(exact_read(length))
-    if message.get('event') not in ('joined', 'ended') or message.get('provider') != 'google-meet':
+    if message.get('event') not in ('joined', 'ended', 'participants') or message.get('provider') != 'google-meet':
         raise ValueError('Unsupported event')
+    count = message.get('participant_count')
+    if count is not None and (type(count) is not int or not 1 <= count <= 100): raise ValueError('Invalid participant count')
     session = message.get('session')
     if not isinstance(session, str) or not 1 <= len(session) <= 128: raise ValueError('Invalid session')
     path = str(Path.home() / 'Library/Application Support/com.meetily.ai/meeting-autostart.sock')
@@ -39,7 +41,7 @@ def main():
                 result = json.loads(connection.makefile('rb').readline(4096))
                 break
         except (OSError, ValueError):
-            if message['event'] == 'ended':
+            if message['event'] != 'joined':
                 return {'accepted':False, 'error':'Meetily is not running'}
             if attempt == 0:
                 subprocess.run(['/usr/bin/open', '-g', app_path()], check=True, stdout=subprocess.DEVNULL)

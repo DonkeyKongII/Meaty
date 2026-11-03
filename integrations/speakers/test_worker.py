@@ -10,6 +10,19 @@ spec=importlib.util.spec_from_file_location('worker',Path(__file__).resolve().pa
 worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
 
 class SpeakerTests(unittest.TestCase):
+ def test_empty_cached_result_is_reanalyzed_and_labels_survive_reopen(self):
+  from unittest.mock import patch
+  with tempfile.TemporaryDirectory() as directory:
+   base={'root':directory,'meeting_id':'saved-meeting'}
+   empty={'model':worker.MODEL_ID,'segments':[],'speakers':[]}
+   voice={'model':worker.MODEL_ID,'segments':[{'start':0.,'end':12.,'speaker':'0'}],
+          'speakers':[{'id':'0','name':'Speaker 1','embedding':[1.,0.],'clean_seconds':12.,'profile_id':None,'status':'unknown'}]}
+   with patch.object(worker,'analyze',return_value=empty):worker.run(dict(base,action='analyze'))
+   with patch.object(worker,'analyze',return_value=voice) as analyze:
+    worker.run(dict(base,action='analyze'));analyze.assert_called_once()
+   worker.run(dict(base,action='label',speaker_id='0',name='Saved name'))
+   self.assertEqual(worker.run(dict(base,action='get'))['speakers'][0]['name'],'Saved name')
+
  def test_match_requires_threshold_and_separation(self):
   profiles=[{'id':'a','name':'A','embedding':[1.,0.]},{'id':'b','name':'B','embedding':[0.,1.]}]
   self.assertEqual(worker.match_voice([1.,.1],profiles)[0]['id'],'a')

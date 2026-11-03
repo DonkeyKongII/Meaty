@@ -1,4 +1,7 @@
 export interface SpeakerAnalysis {
+  job_status?:string; job_error?:string; participant_count?:number;
+  profile_count?:number;
+  learning_notice?:string;
   model:string;
   requested_speakers?:number;
   analysis_warning?:string|null;
@@ -23,4 +26,18 @@ export function speakerLabel(data:SpeakerAnalysis|null,start:number,end?:number)
   const ids=[...overlap].filter(([,duration])=>duration>=Math.min(0.25,maximum)&&duration>=maximum*0.2).map(([id])=>id);
   const names=ids.map(id=>data.speakers.find(s=>s.id===id)?.name||'Unassigned speech');
   return names.join(' / ');
+}
+
+export function speakerTags(data:SpeakerAnalysis|null,start:number,end?:number):{id:string;name:string}[] {
+ if(!Number.isFinite(start))return [];
+ const stop=end!==undefined&&end>start?end:start+0.5;
+ const span={id:`__span__:${start}:${stop}`,name:'Unidentified speaker'};
+ if(!data||data.analysis_warning)return [span];
+ const overlap=new Map<string,number>();
+ for(const turn of data.segments){const duration=Math.min(stop,turn.end)-Math.max(start,turn.start);if(duration>0)overlap.set(turn.speaker,(overlap.get(turn.speaker)||0)+duration);}
+ const max=Math.max(0,...overlap.values());if(!max)return [span];
+ return [...overlap].filter(([,n])=>n>=Math.min(.25,max)&&n>=max*.2).map(([id])=>{
+  const s=data.speakers.find(s=>s.id===id);
+  return !s?span:{id,name:s.status==='unknown'?'Unidentified speaker':s.name};
+ });
 }

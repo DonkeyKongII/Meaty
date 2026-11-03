@@ -483,11 +483,6 @@ pub async fn api_process_transcript<R: Runtime>(
     );
 
     let pool = state.db_manager.pool().clone();
-    let text = match app.path().app_data_dir() {
-        Ok(root) => crate::speakers::summary_text(&root, &pool, &m_id, &text).await
-            .map_err(|e| format!("Could not load saved speaker assignments: {e}"))?,
-        Err(e) => return Err(format!("Could not locate speaker assignments: {e}")),
-    };
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
 
@@ -532,6 +527,16 @@ pub async fn api_process_transcript<R: Runtime>(
         SummaryService::register_cancellation_token(&m_id, started_at);
     let meeting_id_clone = m_id.clone();
     tauri::async_runtime::spawn(async move {
+        let prepared=async {
+            crate::meeting_pipeline::prepare(&pool,&meeting_id_clone,&cancellation_token).await?;
+            let root=app.path().app_data_dir().map_err(|e|e.to_string())?;
+            let text=crate::speakers::summary_text(&root,&pool,&meeting_id_clone,&text).await?;
+            crate::meeting_pipeline::calendar_text(&pool,&meeting_id_clone,text).await
+        }.await;
+        let text=match prepared {Ok(text)=>text,Err(error)=>{
+            if cancellation_token.is_cancelled(){return;}
+            let _=SummaryProcessesRepository::update_process_failed(&pool,&meeting_id_clone,started_at,&error).await;return;
+        }};
         SummaryService::process_transcript_background(
             app,
             pool,

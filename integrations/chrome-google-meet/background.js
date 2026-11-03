@@ -11,15 +11,18 @@ async function deliver(message, tabId) {
   if (message.event === 'joined') {
     const {enabled = true} = await chrome.storage.local.get('enabled');
     if (!enabled) return {accepted:false, disabled:true};
-    if ((await chrome.storage.session.get(key))[key]) return {accepted:true};
+    if ((await chrome.storage.session.get(key))[key]) {
+      if (!Number.isInteger(message.participant_count) || message.participant_count < 1 || message.participant_count > 100) return {accepted:true};
+      message = {...message, event:'participants'};
+    }
   }
   try {
     const result = await chrome.runtime.sendNativeMessage(HOST, {...message, session:`${tabId}:${message.session}`});
     if (result.accepted) {
       if (message.event === 'joined') await chrome.storage.session.set({[key]:true});
-      else await chrome.storage.session.remove([key]);
+      else if (message.event === 'ended') await chrome.storage.session.remove([key]);
     }
-    await chrome.storage.local.set({lastStatus:result.accepted
+    if (message.event !== 'participants') await chrome.storage.local.set({lastStatus:result.accepted
       ? (message.event === 'joined' ? 'Meeting sent to Meetily. Check its recording indicator.' : 'Meeting ended. Meetily will stop after the reconnect grace period.')
       : 'Meetily did not accept the request.'});
     return result;

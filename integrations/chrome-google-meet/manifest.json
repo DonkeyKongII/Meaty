@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Meetily \u2014 Google Meet Auto Start",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Automatically start and stop local Meetily recording with Google Meet calls.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3+DvEsWbw9L5X8PJyk5mNW9YjSivFLkAkOm88J6yOkrv4YgcF3X+z0KKrozodkDxRa3Vj2Hru6v/zDYWU9deAAIIb8HDUL6fGvayK4AwfGYy7CKuOW5B8vAgqFzk5OTBoKcVQkxat4+AabfB+REYrLYhltKeoQgduKhChXcVlMiXdXUEMMnUVzwgTAID3EwjW0GbYsqpAITFNFq5jQuerki4DVy9FXL9Z4S8CA/opvb9fU1C2zyLTv1HK05qYSmUABgkTlRmkfwLIlRphq5fketPutsauJzoTRT1YX5pMQIAAKn6bCMlXwcm3EhhjK2qpiWTvT5PLnqiu2pa07SAYQIDAQAB",
   "permissions": [

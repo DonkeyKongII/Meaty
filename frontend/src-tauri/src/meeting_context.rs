@@ -35,7 +35,8 @@ pub async fn meeting_context_action(
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("meeting_minutes.sqlite");
-    tauri::async_runtime::spawn_blocking(move || {
+    let combined=request["action"] == "combine" && request["include_audio"] != false;
+    let value=tauri::async_runtime::spawn_blocking(move || {
         let mut child = Command::new("/usr/bin/python3")
             .arg(script)
             .arg("--db")
@@ -63,5 +64,7 @@ pub async fn meeting_context_action(
         Ok(value)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    if combined {if let Some(id)=value["id"].as_str() {crate::speakers::enqueue(&app,id,None).await?;}}
+    Ok(value)
 }

@@ -31,6 +31,10 @@ def match_voice(embedding, profiles):
         denominator = norm * np.linalg.norm(other)
         if denominator > 1e-8:
             scores.append((float(np.dot(vector, other) / denominator), profile))
+    best = {}
+    for score, profile in scores:
+        if profile['id'] not in best or score > best[profile['id']][0]: best[profile['id']] = (score, profile)
+    scores = list(best.values())
     scores.sort(key=lambda item: item[0], reverse=True)
     if not scores:
         return None, None
@@ -68,7 +72,8 @@ def requested_count(request):
 
 
 def clustering_warning(result):
-    actual = len(result.get('speakers', []))
+    # A manually named transcript interval is not another detected voice.
+    actual = sum(not speaker.get('id','').startswith('manual-') for speaker in result.get('speakers', []))
     expected = result.get('requested_speakers', -1)
     limit = expected if expected > 0 else MAX_AUTOMATIC_SPEAKERS
     if actual > limit:
@@ -186,12 +191,10 @@ def analyze(request, root):
         if len(samples)/rate > 6*3600:
             raise ValueError('Speaker analysis currently supports recordings up to six hours.')
         turns = [{'start':float(turn.start), 'end':float(turn.end), 'speaker':str(turn.speaker)} for turn in diarizer.process(samples).sort_by_start_time()]
-        if count == -1:
-            validate_turn_count(turns, count)
         mapping = {speaker:str(i) for i,speaker in enumerate(sorted({turn['speaker'] for turn in turns},key=int))}
         for turn in turns: turn['speaker'] = mapping[turn['speaker']]
         speakers = []
-        clips = root/'samples'/request['key']
+        clips = root/'samples'/request['key']/str(uuid.uuid4())
         clips.mkdir(parents=True, exist_ok=True, mode=0o700)
         for speaker in sorted({turn['speaker'] for turn in turns}, key=int):
             intervals = [interval for turn in turns if turn['speaker']==speaker for interval in clean_intervals(turn, turns)]
@@ -237,14 +240,47 @@ def analyze(request, root):
                     os.chmod(preview, 0o600)
             speakers.append({'id':speaker,'name':'Speaker '+str(int(speaker)+1),'embedding':vector,'mixed':mixed,'clean_seconds':round(seconds,1),'sample_path':preview,'profile_id':None,'status':'unknown','score':None})
     result = {'model':MODEL_ID,'requested_speakers':count,'segments':turns,'speakers':speakers}
-    if count > 0:
+    if count == -1 and len(speakers) > MAX_AUTOMATIC_SPEAKERS:
+        # Sherpa's raw groups are often voice fragments, not individual people.
+        # Estimate distinct voices from reliable fragment embeddings before validating.
+        centers = [np.asarray(s['embedding'], dtype=float) for s in speakers
+                   if s.get('embedding') and not s.get('mixed') and s['clean_seconds'] >= 3]
+        centers = [v/np.linalg.norm(v) for v in centers if np.linalg.norm(v)>1e-8]
+        while len(centers)>1:
+            matrix=np.stack(centers) @ np.stack(centers).T
+            np.fill_diagonal(matrix,-1)
+            i,j=np.unravel_index(np.argmax(matrix),matrix.shape)
+            if matrix[i,j]<.65: break
+            center=centers[i]+centers[j];center/=np.linalg.norm(center)
+            centers=[v for n,v in enumerate(centers) if n not in (i,j)]+[center]
+        if not centers or len(centers)>MAX_AUTOMATIC_SPEAKERS:
+            raise ValueError('Could not determine a reliable speaker count. Enter a known count to retry. Existing labels were preserved.')
+        result = consolidate_fragments(result,len(centers))
+        result['estimated_speakers']=len(centers)
+        result['requested_speakers']=-1
+    elif count > 0:
         result = consolidate_fragments(result, count)
     validate_turn_count(result['segments'], count)
     return result
 
 
-def profiles_from(db):
-    return [{'id':row[0], 'name':row[1], 'embedding':json.loads(row[2])} for row in db.execute('SELECT id,name,embedding FROM profiles WHERE model=?',(MODEL_ID,))]
+def profiles_from(db, ids=None, embeddings=True):
+    columns='id,name,embedding' if embeddings else 'id,name'
+    where='model=?'; args=[MODEL_ID]
+    if ids is not None:
+        ids=list(set(ids))
+        if not ids: return []
+        where+=' AND id IN ('+','.join('?' for _ in ids)+')';args+=ids
+    profiles=[]
+    for row in db.execute('SELECT '+columns+' FROM profiles WHERE '+where,args):
+        profile={'id':row[0],'name':row[1]}
+        if embeddings:profile['embedding']=json.loads(row[2])
+        profiles.append(profile)
+    if embeddings:
+        for profile in list(profiles):
+            for (encoded,) in db.execute('SELECT embedding FROM profile_samples WHERE profile_id=?',(profile['id'],)):
+                profiles.append(dict(profile,embedding=json.loads(encoded)))
+    return profiles
 
 
 def public_result(result, profiles):
@@ -257,7 +293,8 @@ def public_result(result, profiles):
         speaker.pop('embedding', None)
         if speaker.get('profile_id') in names:
             speaker['name'] = names[speaker['profile_id']]
-    result['profiles'] = [{'id':p['id'],'name':p['name']} for p in profiles]
+    linked={s.get('profile_id') for s in result['speakers']}
+    result['profiles'] = [{'id':id,'name':name} for id,name in names.items() if id in linked]
     return result
 
 
@@ -271,12 +308,23 @@ def run(request):
         os.chmod(database, 0o600)
         db.execute('CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, model TEXT NOT NULL, embedding TEXT NOT NULL)')
         db.execute('CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, data TEXT NOT NULL)')
+        db.execute('CREATE INDEX IF NOT EXISTS profile_names ON profiles(name COLLATE NOCASE,id)')
+        db.execute('CREATE TABLE IF NOT EXISTS profile_samples (profile_id TEXT, source TEXT, embedding TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY(profile_id,source))')
         action = request['action']
         key = hashlib.sha256(request.get('meeting_id','').encode()).hexdigest()
         request['key'] = key
         row = db.execute('SELECT data FROM meetings WHERE id=?',(key,)).fetchone()
         result = json.loads(row[0]) if row else {'model':MODEL_ID,'segments':[],'speakers':[]}
-        profiles = profiles_from(db)
+        linked=[p.get('profile_id') for p in result['speakers'] if p.get('profile_id')]
+        if request.get('profile_id'): linked.append(request['profile_id'])
+        profiles = profiles_from(db, None if action=='analyze' else linked, embeddings=action=='analyze')
+        if action=='search':
+            query=str(request.get('query','')).strip()[:100]
+            offset=max(0,min(int(request.get('offset',0)),1000000));limit=20
+            pattern='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+            rows=db.execute("SELECT id,name FROM profiles WHERE name LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE,id LIMIT ? OFFSET ?",(pattern,limit+1,offset)).fetchall()
+            return {'items':[{'id':r[0],'name':r[1]} for r in rows[:limit]],'has_more':len(rows)>limit,'offset':offset,'total':db.execute('SELECT count(*) FROM profiles').fetchone()[0]}
+
         if action in ('forget','rename') and not any(profile['id']==request.get('profile_id') for profile in profiles):
             raise ValueError('The selected voice profile no longer exists.')
         if action == 'analyze':
@@ -284,8 +332,8 @@ def run(request):
             if clustering_warning(result) and count == -1:
                 raise ValueError('The previous automatic analysis over-split the voices. Enter the known speaker count to re-detect.')
             same_count = result.get('requested_speakers', -1) == count
-            if row and not request.get('force',False) and same_count:
-                return public_result(result,profiles)
+            if row and result.get('segments') and not request.get('force',False) and same_count:
+                return {**public_result(result,profiles),'profile_count':db.execute('SELECT count(*) FROM profiles').fetchone()[0]}
             result = analyze(request, root)
             # Validate again at the persistence boundary, including alternate analyzers.
             validate_turn_count(result['segments'], count)
@@ -298,7 +346,22 @@ def run(request):
                     speaker['score'] = score
                     if profile:
                         speaker.update(name=profile['name'],profile_id=profile['id'],status='recognized')
-        elif action in ('enroll','label'):
+        elif action in ('enroll','label','assign'):
+            selected=request.get('speaker_id','')
+            if action=='assign' and selected.startswith('__span__:'):
+                import math
+                _,start,end=selected.split(':');start=float(start);end=float(end)
+                if not math.isfinite(start) or not math.isfinite(end) or start<0 or end<=start or end-start>600:raise ValueError('Invalid transcript interval')
+                group='manual-'+str(uuid.uuid4())
+                turns=[]
+                for turn in result['segments']:
+                    if turn['end']<=start or turn['start']>=end:turns.append(turn);continue
+                    if turn['start']<start:turns.append(dict(turn,end=start))
+                    if turn['end']>end:turns.append(dict(turn,start=end))
+                turns.append({'start':start,'end':end,'speaker':group})
+                result['segments']=sorted(turns,key=lambda t:t['start'])
+                result['speakers'].append({'id':group,'name':'Unidentified speaker','embedding':None,'mixed':False,'clean_seconds':0,'sample_path':None,'profile_id':None,'status':'unknown'})
+                request['speaker_id']=group
             if clustering_warning(result):
                 raise ValueError(clustering_warning(result))
             speaker = next((s for s in result['speakers'] if s['id']==request.get('speaker_id')), None)
@@ -307,8 +370,20 @@ def run(request):
             name = request.get('name','').strip()
             if not name or len(name)>100:
                 raise ValueError('Enter a name between 1 and 100 characters.')
-            speaker.update(name=name,status='manual',profile_id=None)
-            if action == 'enroll':
+            previous_profile=speaker.get('profile_id')
+            if previous_profile and previous_profile!=request.get('profile_id'):
+                db.execute('DELETE FROM profile_samples WHERE profile_id=? AND source=?',(previous_profile,key+':'+speaker['id']))
+            speaker.update(name=name,status='manual',profile_id=request.get('profile_id'))
+            if request.get('profile_id') and not any(p['id']==request['profile_id'] for p in profiles):raise ValueError('The selected speaker no longer exists.')
+            learning = action == 'enroll' or (action=='assign' and request.get('remember',True))
+            eligible = bool(speaker.get('embedding')) and not speaker.get('mixed') and speaker['clean_seconds'] >= MIN_ENROLL_SECONDS
+            if action == 'assign' and learning and not eligible:
+                result['learning_notice']='Speaker assigned. This clip has too little clean speech to improve voice matching.'
+            if action=='assign' and not request.get('profile_id') and not (learning and eligible):
+                profile_id=str(uuid.uuid4())
+                db.execute('INSERT INTO profiles VALUES (?,?,?,?)',(profile_id,name,MODEL_ID,'[]'))
+                speaker['profile_id']=profile_id
+            if action == 'enroll' or (learning and eligible):
                 if speaker.get('mixed'):
                     raise ValueError('This speaker group may mix voices. Re-detect the speakers before saving a voice profile.')
                 if not speaker['embedding'] or speaker['clean_seconds'] < MIN_ENROLL_SECONDS:
@@ -316,9 +391,14 @@ def run(request):
                 profile_id = request.get('profile_id') or str(uuid.uuid4())
                 if request.get('profile_id') and not any(p['id']==profile_id for p in profiles):
                     raise ValueError('The selected voice profile no longer exists.')
-                # Explicit enrollment only. Never learn from an automatic guess.
-                db.execute('INSERT OR REPLACE INTO profiles VALUES (?,?,?,?)',(profile_id,name,MODEL_ID,json.dumps(speaker['embedding'])))
+                # Add confirmed exemplars; retain the original anchor rather than replacing it.
+                source=key+':'+speaker['id']
+                db.execute('DELETE FROM profile_samples WHERE source=? AND profile_id!=?',(source,profile_id))
+                db.execute('INSERT OR IGNORE INTO profiles VALUES (?,?,?,?)',(profile_id,name,MODEL_ID,'[]'))
+                db.execute('INSERT OR REPLACE INTO profile_samples(profile_id,source,embedding) VALUES(?,?,?)',(profile_id,source,json.dumps(speaker['embedding'])))
+                db.execute('DELETE FROM profile_samples WHERE profile_id=? AND source NOT IN (SELECT source FROM profile_samples WHERE profile_id=? ORDER BY created_at DESC,rowid DESC LIMIT 12)',(profile_id,profile_id))
                 speaker['profile_id'] = profile_id
+                result['learning_notice']='Speaker assigned. Confirmed voice sample saved for future matching.'
         elif action == 'rename':
             name=request.get('name','').strip()
             if not name or len(name)>100: raise ValueError('Enter a name between 1 and 100 characters.')
@@ -326,6 +406,7 @@ def run(request):
         elif action == 'forget':
             forgotten = request.get('profile_id')
             db.execute('DELETE FROM profiles WHERE id=?',(forgotten,))
+            db.execute('DELETE FROM profile_samples WHERE profile_id=?',(forgotten,))
             for stored_key, encoded in db.execute('SELECT id,data FROM meetings').fetchall():
                 stored = json.loads(encoded)
                 for speaker in stored['speakers']:
@@ -336,10 +417,10 @@ def run(request):
                     result = stored
         elif action != 'get':
             raise ValueError('Unsupported speaker action.')
-        if action in ('analyze','enroll','label'):
+        if action in ('analyze','enroll','label','assign'):
             db.execute('INSERT OR REPLACE INTO meetings VALUES (?,?)',(key,json.dumps(result)))
-        profiles=profiles_from(db)
-        return public_result(result,profiles)
+        profiles=profiles_from(db,[p.get('profile_id') for p in result['speakers']],embeddings=False)
+        return {**public_result(result,profiles),'profile_count':db.execute('SELECT count(*) FROM profiles').fetchone()[0]}
 
 
 if __name__ == '__main__':

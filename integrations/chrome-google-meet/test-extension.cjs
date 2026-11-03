@@ -4,12 +4,12 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const code = fs.readFileSync(path.join(__dirname, 'content.js'), 'utf8');
-function fixture({label = 'Join now', visible = true, icon = '', pathname = '/abc-defg-hij', stored = new Map()} = {}) {
+function fixture({label = 'Join now', visible = true, icon = '', count = null, labelledCount = false, pathname = '/abc-defg-hij', stored = new Map()} = {}) {
   let tick, now = 10000;
   const sent = [];
   const button = {getClientRects: () => visible ? [1] : [], getAttribute: name => name === 'aria-label' ? label : '', querySelectorAll: () => [{textContent:icon}]};
   vm.runInNewContext(code, {
-    location:{pathname}, document:{querySelectorAll:() => [button]}, getComputedStyle:() => ({visibility:'visible'}),
+    location:{pathname}, document:{getElementById:id=>id==='people-label'?{textContent:'People'}:null,querySelectorAll:selector => selector.includes('data-participant-count') ? (count===null?[]:[{getClientRects:()=>[1],getAttribute:name=>name===(labelledCount?'aria-labelledby':'data-participant-count')?(labelledCount?'people-label':String(count)):'',textContent:labelledCount?'People'+count:''}]) : [button]}, getComputedStyle:() => ({visibility:'visible'}),
     chrome:{runtime:{sendMessage: async message => {sent.push(message); return {accepted:true};}}},
     sessionStorage:{getItem:key => stored.get(key) || null,setItem:(key,value)=>stored.set(key,value),removeItem:key=>stored.delete(key)},
     crypto:{randomUUID:() => `session-${now}`}, Date:{now:() => now}, console,
@@ -59,8 +59,8 @@ function worker({enabled=true, fail=false}={}) {
     chrome:{runtime:{onMessage:{addListener:fn=>listener=fn},async sendNativeMessage(host,message){calls++;messages.push(message);if(fail)throw Error('Host unavailable');return {accepted:true};}},
       storage:{local:storage(local),session:storage(session)},tabs:{onRemoved:{addListener:fn=>removed=fn},onUpdated:{addListener:fn=>updated=fn}}},
   });
-  return {messages, close: id=>removed(id), navigate: (id,url)=>updated(id,{url}), get calls(){return calls;},setFail(value){fail=value;},send(sender={tab:{id:1},url:'https://meet.google.com/abc-defg-hij'},event='joined') {
-    return new Promise(resolve=>{const result=listener({event,provider:'google-meet',session:'same-call'},sender,resolve);if(!result)resolve(undefined);});
+  return {messages, close: id=>removed(id), navigate: (id,url)=>updated(id,{url}), get calls(){return calls;},setFail(value){fail=value;},send(sender={tab:{id:1},url:'https://meet.google.com/abc-defg-hij'},event='joined',count=null) {
+    return new Promise(resolve=>{const result=listener({event,provider:'google-meet',session:'same-call',participant_count:count},sender,resolve);if(!result)resolve(undefined);});
   }};
 }
 test('worker sends an accepted session to native host only once',async()=>{
@@ -97,3 +97,17 @@ test('duplicated tabs receive distinct native session identities',async()=>{
  assert.notEqual(w.messages[0].session,w.messages[1].session);
  await w.close(1);assert.equal(w.messages.at(-1).session,w.messages[0].session);
 });
+
+test('joined heartbeat samples explicit participant counts including self', async()=>{
+ const f=fixture({label:'Leave call',count:8}); await f.tick();assert.equal(f.sent.at(-1).participant_count,8);
+});
+test('participant updates keep accepted ownership and tab-close stop behavior',async()=>{
+ const f=worker();await f.send();await f.send(undefined,'joined',8);await f.send(undefined,'joined',3);
+ assert.equal(f.messages[1].event,'participants');assert.equal(f.messages[1].participant_count,8);
+ assert.equal(f.messages[2].event,'participants');await f.close(1);assert.equal(f.messages.at(-1).event,'ended');
+});
+test('invalid counts do not create participant events',async()=>{
+ const f=worker();await f.send();await f.send(undefined,'joined',999);assert.equal(f.calls,1);
+});
+
+test('Google Meet People badge uses aria-labelledby and concatenated text',async()=>{const f=fixture({label:'Leave call',count:7,labelledCount:true});await f.tick();assert.equal(f.sent.at(-1).participant_count,7);});

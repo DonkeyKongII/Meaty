@@ -48,7 +48,7 @@ export function MeetingContextPanel({meetingId}: {meetingId:string}) {
   }
   async function queue(){setBusy(true);try{setData(await call({action:'queue',meeting_id:meetingId}));}catch(e){setError(String(e));}finally{setBusy(false);}}
   return <div className="border-b p-3 text-sm space-y-2">
-    <div className="flex items-center gap-3"><strong>People & companies</strong><span>{data?.classification==='internal'?'Internal':data?.companies?.map(c=>c.name).join(', ')||'Unclassified'}</span><button className="text-blue-600 ml-auto" onClick={edit}>Edit</button></div>
+    <div className="flex items-center gap-3"><strong>People & companies</strong><span>{data?.classification==='internal'?'Internal':data?.companies?.map(c=>c.name).join(', ')||'Unclassified'}</span><button className="meaty-action text-blue-600 ml-auto" onClick={edit}>Edit</button></div>
     {data?.calendar_title&&<div>{data.calendar_title}</div>}
     <div className="text-gray-600">{data?.participants?.length||0} expected participants · {data?.participants?.filter(p=>p.attendance==='confirmed').length||0} confirmed attendees</div>
     <details className="text-xs"><summary className="cursor-pointer text-gray-600">Participants & evidence{data?.identity_suggestions?.length ? ` · ${data.identity_suggestions.length} identity suggestions` : ''}</summary><div className="space-y-2 max-h-48 overflow-y-auto mt-2">
@@ -56,13 +56,13 @@ export function MeetingContextPanel({meetingId}: {meetingId:string}) {
     {!!data?.identity_suggestions?.length&&<div className="text-xs"><strong>Suggested identities — review in Speakers</strong>{data.identity_suggestions.map((s,i)=><p key={i}>{s.name}{s.start!=null?` at ${Math.floor(s.start/60)}:${String(Math.floor(s.start%60)).padStart(2,'0')}`:''}: {s.reason}</p>)}</div>}
     {data?.notes&&<p className="text-xs text-gray-500">{data.notes}</p>}
     </div></details>
-    <div className="flex gap-3 text-xs text-gray-500"><span>Calendar enrichment: {data?.status?.replaceAll('_',' ')||'loading'}</span><button disabled={busy} onClick={queue} className="text-blue-600">Request calendar lookup</button></div>
+    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500"><span>Calendar enrichment: {data?.status?.replaceAll('_',' ')||'loading'}</span><button disabled={busy} onClick={queue} className="meaty-action text-blue-600">Retry calendar lookup</button></div>
     {editing&&<div className="space-y-2 max-h-64 overflow-y-auto">
       <label className="block">Company for this meeting<textarea aria-label="Company for this meeting" className="border rounded w-full p-2" rows={2} value={company} onChange={e=>setCompany(e.target.value)} placeholder="Company name, or Internal"/><span className="text-xs text-gray-500">One company per line. Enter Internal for an internal meeting. Leave blank to use email domains automatically.</span></label>
       <label className="block">Participants — one Name &lt;email&gt; per line; add “confirmed” for known attendees<textarea className="border rounded w-full p-2" rows={5} value={people} onChange={e=>setPeople(e.target.value)}/></label>
       <label className="block">Internal email domains<input className="border rounded w-full p-2" value={domains} onChange={e=>setDomains(e.target.value)}/></label>
       <label className="block">Company names — domain = Company Name<textarea className="border rounded w-full p-2" rows={3} value={aliases} onChange={e=>setAliases(e.target.value)}/></label>
-      <button disabled={busy} className="text-blue-600 mr-3" onClick={save}>Save</button><button onClick={()=>setEditing(false)}>Cancel</button>
+      <button disabled={busy} className="meaty-action text-blue-600 mr-3" onClick={save}>Save</button><button className="meaty-action" onClick={()=>setEditing(false)}>Cancel</button>
     </div>}
     {error&&<p role="alert" className="text-red-600">{error}</p>}
   </div>;

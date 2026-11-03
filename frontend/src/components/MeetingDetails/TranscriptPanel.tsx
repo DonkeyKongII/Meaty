@@ -7,8 +7,10 @@ import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { useMemo, useState } from 'react';
 import { CombineMeetingsPanel } from './CombineMeetingsPanel';
 import { MeetingContextPanel } from './MeetingContextPanel';
+import {MeetingPipelineStatus} from './MeetingPipelineStatus';
+import {SpeakerAssignment} from './SpeakerAssignment';
 import { SpeakerPanel } from './SpeakerPanel';
-import { SpeakerAnalysis, speakerLabel } from '@/lib/speaker-labels';
+import { SpeakerAnalysis, speakerLabel, speakerTags } from '@/lib/speaker-labels';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -55,6 +57,8 @@ export function TranscriptPanel({
 }: TranscriptPanelProps) {
   const [speakerData, setSpeakerData] = useState<SpeakerAnalysis|null>(null);
 
+  const [assignTarget,setAssignTarget]=useState<{id:string;name:string}|null>(null);
+
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -72,9 +76,10 @@ export function TranscriptPanel({
   }, [transcripts, usePagination, segments]);
 
   return (
-    <div className="flex h-full min-w-0 w-full bg-white flex-col relative @container">
+    <div className="meaty-transcript flex h-full min-w-0 w-full bg-white flex-col relative @container">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="meaty-toolbar p-4 border-b border-gray-200">
+        <h2 className="meaty-panel-label">The conversation</h2>
         <TranscriptButtonGroup
           transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
           onCopyTranscript={onCopyTranscript}
@@ -85,14 +90,18 @@ export function TranscriptPanel({
         />
       </div>
 
+      {meetingId&&!isRecording&&<MeetingPipelineStatus meetingId={meetingId}/>}
       {meetingId && !isRecording && <CombineMeetingsPanel meetingId={meetingId}/>}
       {meetingId && !isRecording && <MeetingContextPanel meetingId={meetingId}/>}
       {meetingId && <SpeakerPanel meetingId={meetingId} disabled={isRecording} onChange={setSpeakerData}/>}
 
+      {assignTarget&&meetingId&&<SpeakerAssignment key={`${meetingId}:${assignTarget.id}`} meetingId={meetingId} target={assignTarget} data={speakerData} onClose={()=>setAssignTarget(null)} onSave={value=>{setSpeakerData(value);window.dispatchEvent(new CustomEvent('speaker-labels-saved',{detail:{meetingId,value}}));}}/>}
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
         <VirtualizedTranscriptView
           segments={convertedSegments}
+          onAssignSpeaker={meetingId&&!isRecording&&!['queued','running'].includes(speakerData?.job_status||'')?setAssignTarget:undefined}
+          speakerTags={meetingId&&!isRecording?Object.fromEntries(convertedSegments.map(segment=>[segment.id,speakerTags(speakerData,segment.timestamp,segment.endTime)])):undefined}
           speakerLabels={Object.fromEntries(convertedSegments.map(segment => [segment.id, segment.audioTimestampKnown === false ? undefined : speakerLabel(speakerData, segment.timestamp, segment.endTime)]))}
           isRecording={isRecording}
           isPaused={false}

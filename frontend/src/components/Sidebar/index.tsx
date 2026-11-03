@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -30,7 +30,6 @@ import Logo from '../Logo';
 import Info from '../Info';
 import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
 
 interface SidebarItem {
   id: string;
@@ -521,13 +520,15 @@ const Sidebar: React.FC = () => {
     return (
       <div key={item.id}>
         <div
+          data-meaty-active={isActive||undefined}
+          data-meaty-folder={item.type==='folder'||undefined}
           className={`flex items-center transition-all duration-150 group ${item.type === 'folder' && depth === 0
             ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
             : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-blue-100 text-blue-700 font-medium' :
               hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
             } cursor-pointer`
             }`}
-          style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
+          style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft: item.type === 'file' ? '12px' : paddingLeft }}
           onClick={() => {
             if (item.type === 'folder') {
               toggleFolder(item.id);
@@ -559,20 +560,16 @@ const Sidebar: React.FC = () => {
               )}
             </>
           ) : (
-            <div className="flex flex-col w-full">
-              <div className="flex items-center w-full">
-                {isMeetingItem ? (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
-                    <File className="w-3.5 h-3.5 text-gray-600" />
-                  </div>
-                ) : (
+            <div className="flex min-w-0 flex-col w-full">
+              <div className="relative flex min-w-0 items-center w-full">
+                {!isMeetingItem && (
                   <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-blue-100">
                     <Plus className="w-3.5 h-3.5 text-blue-600" />
                   </div>
                 )}
-                <span className="flex-1 break-words">{item.title}</span>
+                <span className="min-w-0 flex-1 line-clamp-2">{item.title}</span>
                 {isMeetingItem && (
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                  <div className="absolute right-0 top-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150 bg-yellow-50">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -599,7 +596,7 @@ const Sidebar: React.FC = () => {
 
               {/* Show transcript match snippet if available */}
               {hasTranscriptMatch && (
-                <div className="mt-1 ml-8 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
+                <div className="mt-1 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
                   <span className="font-medium text-yellow-600">Match:</span> {matchingResult.matchContext}
                 </div>
               )}
@@ -616,10 +613,11 @@ const Sidebar: React.FC = () => {
   };
 
   return (
-    <div className="fixed top-0 left-0 h-screen z-40">
+    <div data-meaty-sidebar className="meaty-sidebar fixed top-0 left-0 h-screen z-40">
       {/* Floating collapse button */}
       <button
         onClick={toggleCollapse}
+        aria-label={isCollapsed?"Expand sidebar":"Collapse sidebar"}
         className="absolute -right-6 top-20 z-50 p-1 bg-white hover:bg-gray-100 rounded-full shadow-lg border"
         style={{ transform: 'translateX(50%)' }}
       >
@@ -650,23 +648,12 @@ const Sidebar: React.FC = () => {
                 <Logo isCollapsed={isCollapsed} />
 
                 <div className="relative mb-1">
-                  <InputGroup >
-                    <InputGroupInput placeholder='Search meeting content...' value={searchQuery}
-                      onChange={(e) => handleSearchChange(e.target.value)}
-                    />
-                    <InputGroupAddon>
-                      <SearchIcon />
-                    </InputGroupAddon>
-                    {searchQuery &&
-                      <InputGroupAddon align={'inline-end'}>
-                        <InputGroupButton
-                          onClick={() => handleSearchChange('')}
-                        >
-                          <X />
-                        </InputGroupButton>
-                      </InputGroupAddon>
-                    }
-                  </InputGroup>
+                  <div className="meaty-search" role="search">
+                    <SearchIcon aria-hidden="true" className="h-4 w-4 shrink-0" />
+                    <input aria-label="Search meeting content" placeholder="Search meeting content…" value={searchQuery}
+                      onChange={(e) => handleSearchChange(e.target.value)} />
+                    {searchQuery && <button type="button" aria-label="Clear meeting search" onClick={() => handleSearchChange('')}><X className="h-4 w-4" /></button>}
+                  </div>
                 </div>
               </div>
             )}
