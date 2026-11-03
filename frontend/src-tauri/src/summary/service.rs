@@ -1,5 +1,6 @@
 use crate::database::repositories::{
-    meeting::MeetingsRepository, setting::SettingsRepository, summary::SummaryProcessesRepository,
+    action_item::ActionItemsRepository, meeting::MeetingsRepository,
+    setting::SettingsRepository, summary::SummaryProcessesRepository,
 };
 use crate::summary::llm_client::LLMProvider;
 use crate::summary::language_detection::detect_summary_language;
@@ -17,7 +18,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -32,6 +33,58 @@ struct RegisteredCancellation {
 
 static CANCELLATION_REGISTRY: LazyLock<Arc<Mutex<HashMap<String, RegisteredCancellation>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+/// Extract action items from summary markdown as (text, completed) rows.
+///
+/// Two shapes are recognized: checkbox items anywhere in the document
+/// (`- [ ]` / `- [x]`), and plain bullets under a heading whose title reads
+/// like an action list ("Action Items", "Next Steps", "Follow-ups", "To Do").
+fn parse_action_items(markdown: &str) -> Vec<(String, bool)> {
+    const ACTION_HEADINGS: [&str; 7] = [
+        "action items",
+        "action item",
+        "actions",
+        "next steps",
+        "follow-ups",
+        "follow ups",
+        "to do",
+    ];
+    let mut items = Vec::new();
+    let mut in_action_section = false;
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            let heading = trimmed.trim_start_matches('#').trim().to_lowercase();
+            let heading = heading.trim_end_matches([':', '.']);
+            in_action_section = ACTION_HEADINGS
+                .iter()
+                .any(|candidate| heading == *candidate || heading.starts_with(&format!("{} ", candidate)));
+            continue;
+        }
+        let bullet = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "));
+        if let Some(rest) = bullet {
+            if let Some(done) = rest
+                .strip_prefix("[ ]")
+                .map(|_| false)
+                .or_else(|| rest.strip_prefix("[x]").map(|_| true))
+                .or_else(|| rest.strip_prefix("[X]").map(|_| true))
+            {
+                let text = rest[3..].trim().to_string();
+                if !text.is_empty() {
+                    items.push((text, done));
+                }
+            } else if in_action_section {
+                let text = rest.trim().to_string();
+                if !text.is_empty() {
+                    items.push((text, false));
+                }
+            }
+        }
+    }
+    items
+}
 
 /// Strips the first `#` heading line; returns "" if no `#` is found.
 fn strip_leading_title(markdown: &str) -> String {
@@ -332,7 +385,7 @@ impl SummaryService {
     /// * `custom_prompt` - Optional user-provided context
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
     pub async fn process_transcript_background<R: tauri::Runtime>(
-        _app: AppHandle<R>,
+        app: AppHandle<R>,
         pool: SqlitePool,
         meeting_id: String,
         started_at: DateTime<Utc>,
@@ -476,7 +529,7 @@ impl SummaryService {
         };
 
         // Get app data directory for BuiltInAI provider
-        let app_data_dir = _app.path().app_data_dir().ok();
+        let app_data_dir = app.path().app_data_dir().ok();
 
         if let Some(code) = &summary_language {
             info!("📝 Summary language preference: {}", code);
@@ -613,6 +666,25 @@ impl SummaryService {
                                 error!("Failed to update meeting name for {}: {}", meeting_id, error);
                             }
                         }
+                        // Persist action items as structured rows so task sync
+                        // reads rows instead of parsing prose, and tell every
+                        // listener (frontend, Life bridge) the summary is done.
+                        let items = parse_action_items(&generated.final_markdown);
+                        if let Err(error) =
+                            ActionItemsRepository::replace_for_meeting(&pool, &meeting_id, &items)
+                                .await
+                        {
+                            error!("Failed to save action items for {}: {}", meeting_id, error);
+                        }
+                        if let Err(error) = app.emit(
+                            "summary-completed",
+                            serde_json::json!({
+                                "meeting_id": meeting_id,
+                                "action_item_count": items.len(),
+                            }),
+                        ) {
+                            warn!("Failed to emit summary-completed for {}: {}", meeting_id, error);
+                        }
                         info!("Summary saved successfully for meeting_id: {}", meeting_id);
                     }
                     Ok(false) => warn!("Skipped stale summary completion for meeting_id: {}", meeting_id),
@@ -703,6 +775,37 @@ mod tests {
         assert!(SummaryService::cancel_summary(&meeting_id, second_started_at));
         assert!(second.is_cancelled());
         SummaryService::cleanup_cancellation_token(&meeting_id, second_started_at);
+    }
+
+    #[test]
+    fn test_parse_action_items_checkboxes_anywhere() {
+        let markdown = "# Standup\n\n## Summary\nTalked.\n- [ ] Email the deck\n- [x] Book the room\n- [X] Send invite\n";
+        assert_eq!(
+            parse_action_items(markdown),
+            vec![
+                ("Email the deck".to_string(), false),
+                ("Book the room".to_string(), true),
+                ("Send invite".to_string(), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_action_items_bullets_only_under_action_heading() {
+        let markdown = "## Notes\n- just a note\n## Action Items\n- Follow up with Acme\n* Schedule review\n## Decisions\n- not an action\n";
+        assert_eq!(
+            parse_action_items(markdown),
+            vec![
+                ("Follow up with Acme".to_string(), false),
+                ("Schedule review".to_string(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_action_items_empty() {
+        assert!(parse_action_items("# Title\nSome prose.\n").is_empty());
+        assert!(parse_action_items("").is_empty());
     }
 
     #[test]

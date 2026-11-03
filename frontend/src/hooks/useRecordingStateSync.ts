@@ -48,15 +48,44 @@ export function useRecordingStateSync(
     // Test if Tauri is available
     console.log('Testing Tauri availability...');
     if (typeof window !== 'undefined' && (window as any).__TAURI__) {
-      console.log('Tauri is available, starting state check');
+      console.log('Tauri is available, listening for recording events and visibility changes');
       checkRecordingState();
 
-      // Set up a polling interval to periodically check recording state
-      const interval = setInterval(checkRecordingState, 1000); // Check every 1 second
+      let unlistenStarted: (() => void) | undefined;
+      let unlistenStopped: (() => void) | undefined;
+
+      const setupEventListeners = async () => {
+        try {
+          unlistenStarted = await recordingService.onRecordingStarted(() => {
+            console.log('useRecordingStateSync: onRecordingStarted event received');
+            setIsRecording(true);
+            setIsMeetingActive(true);
+          });
+          unlistenStopped = await recordingService.onRecordingStopped(() => {
+            console.log('useRecordingStateSync: onRecordingStopped event received');
+            setIsRecording(false);
+          });
+        } catch (err) {
+          console.error('Failed to attach recording event listeners:', err);
+        }
+      };
+
+      setupEventListeners();
+
+      // Immediate refresh on visibility restore
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          checkRecordingState();
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
 
       return () => {
-        console.log('Cleaning up recording state check interval');
-        clearInterval(interval);
+        console.log('Cleaning up recording state event listeners');
+        if (unlistenStarted) unlistenStarted();
+        if (unlistenStopped) unlistenStopped();
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     } else {
       console.log('Tauri is not available, skipping state check');

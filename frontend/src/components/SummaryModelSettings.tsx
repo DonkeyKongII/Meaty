@@ -130,7 +130,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Auto Summary</h3>
             <p className="text-sm text-gray-600">Auto Generating summary after meeting completion(Stopping)</p>
           </div>
-          <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
+          <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} aria-label="Auto summary" />
         </div>
       </div>
 

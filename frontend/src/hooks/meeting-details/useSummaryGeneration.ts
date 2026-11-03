@@ -461,6 +461,10 @@ export function useSummaryGeneration({
       toast.info('Loading model configuration, please wait...');
       return;
     }
+    // Guard against double submission while a generation is already running:
+    // the button only disables for model-config loading, so repeated clicks
+    // during transcript fetch/model validation used to stack generations.
+    if (summaryStatus === 'processing' || summaryStatus === 'regenerating') return;
     const allTranscripts = await fetchAllTranscripts(meeting.id);
     if (!allTranscripts.length) {
       showPreflightError('No transcripts available for summary');
@@ -512,10 +516,12 @@ export function useSummaryGeneration({
     onOpenModelSettings,
     processSummary,
     showPreflightError,
+    summaryStatus,
   ]);
 
   // Public API: Regenerate summary from the current saved transcript
   const handleRegenerateSummary = useCallback(async () => {
+    if (summaryStatus === 'processing' || summaryStatus === 'regenerating') return;
     const allTranscripts = await fetchAllTranscripts(meeting.id);
 
     if (!allTranscripts.length) {
@@ -528,7 +534,7 @@ export function useSummaryGeneration({
       ...buildSummaryTranscriptPayload(allTranscripts),
       isRegeneration: true
     });
-  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
+  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, summaryStatus]);
 
   // Public API: Stop ongoing summary generation
   const handleStopGeneration = useCallback(async () => {

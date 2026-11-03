@@ -169,13 +169,17 @@ function MeetingDetailsContent() {
     };
 
     loadData();
-    const timer=setInterval(async()=>{
-      if(backgroundDone)return;
-      try {const pipeline=await invoke<{status:string}>('meeting_pipeline_status',{meetingId});
-        if(pipeline.status==='waiting'||pipeline.status==='started') await fetchMeetingSummary();
-      }catch{}
-    },5000);
-    return () => { cancelled = true;clearInterval(timer); };
+    const handlePipelineUpdate = (e: Event) => {
+      if (cancelled || backgroundDone) return;
+      const detail = (e as CustomEvent).detail;
+      if (detail?.meetingId !== meetingId) return;
+      const status = detail?.pipeline?.status;
+      if (status === 'waiting' || status === 'started') {
+        void fetchMeetingSummary();
+      }
+    };
+    window.addEventListener('meeting-pipeline-updated', handlePipelineUpdate);
+    return () => { cancelled = true; window.removeEventListener('meeting-pipeline-updated', handlePipelineUpdate); };
   }, [meetingId]);
 
   // Auto-generation check: runs when meeting is loaded with no summary

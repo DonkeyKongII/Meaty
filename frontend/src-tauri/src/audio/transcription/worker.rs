@@ -75,9 +75,13 @@ pub fn start_transcription_task<R: Runtime>(
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
-        // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
+        // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed,
+        // AtomicU64 for chunks dropped without transcribing (e.g. model unloaded mid-
+        // recording). Dropped chunks are NOT counted as completed: the end-of-recording
+        // check compares queued vs completed and reports dropped chunks as lost.
         let chunks_queued = Arc::new(AtomicU64::new(0));
         let chunks_completed = Arc::new(AtomicU64::new(0));
+        let chunks_dropped = Arc::new(AtomicU64::new(0));
         let input_finished = Arc::new(AtomicBool::new(false));
 
         info!("📊 Starting {} transcription worker{} (serial mode for ordered emission)", NUM_WORKERS, if NUM_WORKERS == 1 { "" } else { "s" });
@@ -93,6 +97,7 @@ pub fn start_transcription_task<R: Runtime>(
             let app_clone = app.clone();
             let work_receiver_clone = work_receiver.clone();
             let chunks_completed_clone = chunks_completed.clone();
+            let chunks_dropped_clone = chunks_dropped.clone();
             let input_finished_clone = input_finished.clone();
             let chunks_queued_clone = chunks_queued.clone();
 
@@ -141,9 +146,16 @@ pub fn start_transcription_task<R: Runtime>(
 
                             // Check if model is still loaded before processing
                             if !engine_clone.is_model_loaded().await {
-                                warn!("⚠️ Worker {}: Model unloaded, but continuing to preserve chunk {}", worker_id, chunk.chunk_id);
-                                // Still count as completed even if we can't process
-                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                warn!("⚠️ Worker {}: Model unloaded - dropping chunk {} (transcript will have a gap)", worker_id, chunk.chunk_id);
+                                // Count as dropped, NOT completed, so the end-of-recording
+                                // check reports the gap instead of claiming zero loss.
+                                let dropped = chunks_dropped_clone.fetch_add(1, Ordering::SeqCst) + 1;
+                                let _ = app_clone.emit("transcript-segment-dropped", serde_json::json!({
+                                    "chunk_id": chunk.chunk_id,
+                                    "timestamp": chunk.timestamp,
+                                    "chunks_dropped": dropped,
+                                    "message": "A transcript segment was lost because the speech model was unloaded mid-recording"
+                                }));
                                 continue;
                             }
 
@@ -283,11 +295,13 @@ pub fn start_transcription_task<R: Runtime>(
                         None => {
                             // No more chunks available
                             if input_finished_clone.load(Ordering::SeqCst) {
-                                // Double-check that all queued chunks are actually completed
+                                // Double-check that all queued chunks are accounted for
+                                // (transcribed or explicitly dropped)
                                 let final_queued = chunks_queued_clone.load(Ordering::SeqCst);
                                 let final_completed = chunks_completed_clone.load(Ordering::SeqCst);
+                                let final_dropped = chunks_dropped_clone.load(Ordering::SeqCst);
 
-                                if final_completed >= final_queued {
+                                if final_completed + final_dropped >= final_queued {
                                     info!(
                                         "👷 Worker {} finishing - all {}/{} chunks processed",
                                         worker_id, final_completed, final_queued
@@ -357,12 +371,29 @@ pub fn start_transcription_task<R: Runtime>(
         loop {
             let final_queued = chunks_queued.load(Ordering::SeqCst);
             let final_completed = chunks_completed.load(Ordering::SeqCst);
+            let final_dropped = chunks_dropped.load(Ordering::SeqCst);
 
-            if final_queued == final_completed {
-                info!(
-                    "🎉 ALL {} chunks processed successfully - ZERO chunks lost!",
-                    final_completed
-                );
+            if final_completed + final_dropped >= final_queued {
+                if final_dropped > 0 {
+                    error!(
+                        "❌ {} of {} chunks were dropped without transcription (gaps in transcript)",
+                        final_dropped, final_queued
+                    );
+                    let _ = app.emit(
+                        "transcript-chunk-loss-detected",
+                        serde_json::json!({
+                            "chunks_queued": final_queued,
+                            "chunks_completed": final_completed,
+                            "chunks_lost": final_dropped,
+                            "message": "Some transcript chunks were lost (speech model unloaded during recording)"
+                        }),
+                    );
+                } else {
+                    info!(
+                        "🎉 ALL {} chunks processed successfully - ZERO chunks lost!",
+                        final_completed
+                    );
+                }
                 break;
             } else if verification_attempts < MAX_VERIFICATION_ATTEMPTS {
                 verification_attempts += 1;

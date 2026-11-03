@@ -1,10 +1,34 @@
 'use client';
 import {useEffect,useState} from 'react';
 import {invoke} from '@tauri-apps/api/core';
-type Pipeline={speaker:string;calendar:string;status:string;error?:string;timed_out:boolean};
+export type Pipeline={speaker:string;calendar:string;status:string;error?:string;timed_out:boolean};
 export function MeetingPipelineStatus({meetingId}:{meetingId:string}){
  const [data,setData]=useState<Pipeline|null>(null);
- useEffect(()=>{let active=true;const load=()=>invoke<Pipeline>('meeting_pipeline_status',{meetingId}).then(v=>{if(active)setData(v);}).catch(()=>{});void load();const timer=setInterval(load,5000);return()=>{active=false;clearInterval(timer);};},[meetingId]);
+ useEffect(()=>{
+  let active=true;
+  let timer:NodeJS.Timeout|null=null;
+  const load=()=>{
+   invoke<Pipeline>('meeting_pipeline_status',{meetingId}).then(v=>{
+    if(!active)return;
+    setData(v);
+    window.dispatchEvent(new CustomEvent('meeting-pipeline-updated',{detail:{meetingId,pipeline:v}}));
+   }).catch(()=>{});
+  };
+  const start=()=>{
+   if(timer)clearInterval(timer);
+   load();
+   timer=setInterval(load,5000);
+  };
+  const stop=()=>{
+   if(timer){clearInterval(timer);timer=null;}
+  };
+  const onVisibilityChange=()=>{
+   if(document.visibilityState==='visible'){start();}else{stop();}
+  };
+  if(document.visibilityState==='visible'){start();}
+  document.addEventListener('visibilitychange',onVisibilityChange);
+  return()=>{active=false;stop();document.removeEventListener('visibilitychange',onVisibilityChange);};
+ },[meetingId]);
  if(!data||data.status==='not_queued')return null;
  const waiting=data.status==='waiting';
  return <div role="status" className="border-b bg-blue-50 p-3 text-xs text-gray-700">

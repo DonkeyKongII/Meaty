@@ -4,6 +4,12 @@
   let session = sessionStorage.getItem(storageKey);
   let absentSince = null;
   let running = false;
+  // Send-on-change: only message the bridge when the participant count changes,
+  // plus a heartbeat every 15s so the app can tell a stable meeting from a dead
+  // tab (it stops the recording after ~60s of silence).
+  let lastSignature = null;
+  let lastSentAt = 0;
+  const HEARTBEAT_MS = 15000;
   function joined() {
     if (!/^\/(?:meet\/)?[a-z]{3}-[a-z]{4}-[a-z]{3}(?:[/?]|$)/.test(location.pathname)) return false;
     return [...document.querySelectorAll('button, [role="button"]')].some(el => {
@@ -36,6 +42,9 @@
         running = true;
         try {
           const result = await chrome.runtime.sendMessage({event:'ended', provider:'google-meet', session});
+          // Force a fresh "joined" on rejoin so the app can cancel the stop
+          // grace — send-on-change must never suppress it.
+          lastSignature = null;
           if (result?.accepted && Date.now() - absentSince > 5000) {
             session = null;
             sessionStorage.removeItem(storageKey);
@@ -50,11 +59,23 @@
       session = crypto.randomUUID();
       sessionStorage.setItem(storageKey, session);
     }
+    const count = participantCount();
+    const signature = `${session}:${count}`;
+    if (signature === lastSignature && Date.now() - lastSentAt < HEARTBEAT_MS) return;
     running = true;
-    try { await chrome.runtime.sendMessage({event:'joined', provider:'google-meet', session, participant_count:participantCount()}); }
+    try {
+      await chrome.runtime.sendMessage({event:'joined', provider:'google-meet', session, participant_count:count});
+      lastSignature = signature;
+      lastSentAt = Date.now();
+    }
     catch (error) { console.debug('Meetily extension unavailable:', error.message); }
     finally { running = false; }
   }
+  // Best-effort end notice when the page unloads (refresh, navigation, close);
+  // tab close is also caught background-side via tabs.onRemoved.
+  window.addEventListener('pagehide', () => {
+    if (session) chrome.runtime.sendMessage({event:'ended', provider:'google-meet', session}).catch(() => {});
+  });
   setInterval(check, 2000);
   check();
 })();

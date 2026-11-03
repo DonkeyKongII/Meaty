@@ -1,5 +1,12 @@
 #!/usr/bin/python3
-"""Chrome native messaging host. No network listener or meeting audio access."""
+"""Chrome native messaging host. No network listener or meeting audio access.
+
+Speaks the native-messaging protocol in a loop: the extension keeps one
+persistent port (connectNative) for the whole browser session, so this process
+is spawned once instead of ~1,800 times per hour of meeting. One-shot
+sendNativeMessage clients still work: Chrome closes stdin after the message,
+the read loop sees EOF and exits.
+"""
 import json, socket, struct, subprocess, sys, time
 from pathlib import Path
 
@@ -20,10 +27,7 @@ def app_path():
         return str(target)
     return '/Applications/meetily.app'
 
-def main():
-    length = struct.unpack('<I', exact_read(4))[0]
-    if length > 4096: raise ValueError('Message too large')
-    message = json.loads(exact_read(length))
+def handle(message):
     if message.get('event') not in ('joined', 'ended', 'participants') or message.get('provider') != 'google-meet':
         raise ValueError('Unsupported event')
     count = message.get('participant_count')
@@ -48,9 +52,26 @@ def main():
             time.sleep(0.5)
     return result or {'accepted':False, 'error':'Meetily bridge did not become ready'}
 
+def main():
+    while True:
+        header = sys.stdin.buffer.read(4)
+        if not header:
+            return  # Port closed (or one-shot client finished): exit.
+        if len(header) < 4: raise EOFError('Incomplete native message')
+        length = struct.unpack('<I', header)[0]
+        if length > 4096: raise ValueError('Message too large')
+        message = json.loads(exact_read(length))
+        try:
+            response = handle(message)
+        except Exception as error:
+            response = {'accepted':False, 'error':str(error)}
+        payload = json.dumps(response).encode()
+        sys.stdout.buffer.write(struct.pack('<I', len(payload)) + payload)
+        sys.stdout.buffer.flush()
+
 if __name__ == '__main__':
-    try: response = main()
-    except Exception as error: response = {'accepted':False, 'error':str(error)}
-    payload = json.dumps(response).encode()
-    sys.stdout.buffer.write(struct.pack('<I', len(payload)) + payload)
-    sys.stdout.buffer.flush()
+    try: main()
+    except Exception as error:
+        payload = json.dumps({'accepted':False, 'error':str(error)}).encode()
+        sys.stdout.buffer.write(struct.pack('<I', len(payload)) + payload)
+        sys.stdout.buffer.flush()

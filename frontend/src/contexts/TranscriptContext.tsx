@@ -244,26 +244,72 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
       if (allNewTranscripts.length > 0) {
         setTranscripts(prev => {
-          // Create a set of existing sequence_ids for deduplication
-          const existingSequenceIds = new Set(prev.map(t => t.sequence_id).filter(id => id !== undefined));
-
-          // Filter out any new transcripts that already exist
-          const uniqueNewTranscripts = allNewTranscripts.filter(transcript =>
-            transcript.sequence_id !== undefined && !existingSequenceIds.has(transcript.sequence_id)
-          );
-
-          // Only combine if we have unique new transcripts
-          if (uniqueNewTranscripts.length === 0) {
-            console.log('No unique transcripts to add - all were duplicates');
-            return prev; // No new unique transcripts to add
+          if (prev.length === 0) {
+            // Deduplicate within allNewTranscripts by sequence_id
+            const seen = new Set<number>();
+            const unique: Transcript[] = [];
+            for (const t of allNewTranscripts) {
+              if (t.sequence_id === undefined || !seen.has(t.sequence_id)) {
+                if (t.sequence_id !== undefined) seen.add(t.sequence_id);
+                unique.push(t);
+              }
+            }
+            console.log(`Adding ${unique.length} unique transcripts out of ${allNewTranscripts.length} received`);
+            return unique;
           }
 
-          console.log(`Adding ${uniqueNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received`);
+          const last = prev[prev.length - 1];
+          const lastSeq = last.sequence_id ?? -1;
+          const lastChunkTime = last.chunk_start_time ?? 0;
 
-          // Merge with existing transcripts, maintaining chronological order
-          const combined = [...prev, ...uniqueNewTranscripts];
+          // Common path check: all new transcripts strictly follow the last segment
+          // in (chunk_start_time, sequence_id) order with strictly increasing sequence_ids.
+          // This makes the standard sequential streaming path O(1) amortized.
+          let isStrictlyAppendOrdered = true;
+          let prevSeqInBatch = lastSeq;
+          let prevTimeInBatch = lastChunkTime;
 
-          // Sort by chunk_start_time first, then by sequence_id
+          for (const t of allNewTranscripts) {
+            const tSeq = t.sequence_id ?? -1;
+            const tChunkTime = t.chunk_start_time ?? 0;
+            const timeDiff = tChunkTime - prevTimeInBatch;
+            if (timeDiff < 0 || (timeDiff === 0 && tSeq <= prevSeqInBatch)) {
+              isStrictlyAppendOrdered = false;
+              break;
+            }
+            prevSeqInBatch = tSeq;
+            prevTimeInBatch = tChunkTime;
+          }
+
+          if (isStrictlyAppendOrdered) {
+            console.log(`Adding ${allNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received (append-ordered)`);
+            return [...prev, ...allNewTranscripts];
+          }
+
+          // Slow path: out-of-order or updated sequence_id arrived (e.g. progressive update)
+          // Upsert by sequence_id / id and re-sort.
+          const map = new Map<number | string, Transcript>();
+          for (const t of prev) {
+            const key = t.sequence_id !== undefined ? t.sequence_id : t.id;
+            map.set(key, t);
+          }
+          let addedOrUpdatedCount = 0;
+          for (const t of allNewTranscripts) {
+            const key = t.sequence_id !== undefined ? t.sequence_id : t.id;
+            const existing = map.get(key);
+            if (!existing || existing.text !== t.text || existing.is_partial !== t.is_partial) {
+              addedOrUpdatedCount++;
+            }
+            map.set(key, t);
+          }
+
+          if (addedOrUpdatedCount === 0) {
+            console.log('No unique transcripts to add - all were duplicates');
+            return prev;
+          }
+
+          console.log(`Upserting ${addedOrUpdatedCount} transcripts out of ${allNewTranscripts.length} received`);
+          const combined = Array.from(map.values());
           return combined.sort((a, b) => {
             const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
             if (chunkTimeDiff !== 0) return chunkTimeDiff;

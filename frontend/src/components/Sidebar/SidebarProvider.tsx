@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { companionOwnsRecording } from '@/lib/meeting-recording';
 import Analytics from '@/lib/analytics';
@@ -117,9 +117,33 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, [serverAddress]);
 
   useEffect(() => {
-    fetchMeetings();
-    const timer = setInterval(fetchMeetings, 15000);
-    return () => clearInterval(timer);
+    let timer: NodeJS.Timeout | null = null;
+    const start = () => {
+      if (timer) clearInterval(timer);
+      fetchMeetings();
+      timer = setInterval(fetchMeetings, 15000);
+    };
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        start();
+      } else {
+        stop();
+      }
+    };
+    if (document.visibilityState === 'visible') {
+      start();
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [serverAddress, fetchMeetings]);
 
   useEffect(() => {
@@ -184,12 +208,26 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
       // Track recording initiation from sidebar
       Analytics.trackButtonClick('start_recording', 'sidebar');
+    } else {
+      // While recording, the sidebar button is the always-available Stop
+      // control: on Home it stops directly, elsewhere it navigates Home first
+      // (the Home recording flow owns the actual stop).
+      if (pathname === '/') {
+        window.dispatchEvent(new CustomEvent('stop-recording-from-meeting'));
+      } else {
+        router.push('/');
+      }
+      Analytics.trackButtonClick('stop_recording', 'sidebar');
     }
     // The actual recording start/stop is handled in the Home component
   };
 
   // Consume bridge requests only after the frontend has mounted. Reuse the
   // normal recording flow so model/device validation and UI state stay intact.
+  // A start that arrives while the previous companion-owned recording is still
+  // shutting down (rejoin inside the drain window) is remembered and fired
+  // once recording actually stops, instead of being silently dropped.
+  const pendingRestartRef = useRef<number>(0);
   useEffect(() => {
     let busy = false;
     const timer = setInterval(async () => {
@@ -201,13 +239,17 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
           if (pathname !== '/') router.push('/');
           else window.dispatchEvent(new CustomEvent('stop-recording-from-meeting'));
         }
-        if (requested === 'start' && !isRecording) {
-          sessionStorage.setItem('meetilyCompanionStart', 'true');
-          if (pathname === '/') {
-            window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
-          } else {
-            sessionStorage.setItem('autoStartRecording', 'true');
-            router.push('/');
+        if (requested === 'start') {
+          if (!isRecording) {
+            sessionStorage.setItem('meetilyCompanionStart', 'true');
+            if (pathname === '/') {
+              window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
+            } else {
+              sessionStorage.setItem('autoStartRecording', 'true');
+              router.push('/');
+            }
+          } else if (companionOwnsRecording()) {
+            pendingRestartRef.current = Date.now();
           }
         }
       } catch (error) {
@@ -215,6 +257,23 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       } finally { busy = false; }
     }, 1000);
     return () => clearInterval(timer);
+  }, [isRecording, pathname, router]);
+
+  // Fire a remembered restart once the shutdown has completed (45s TTL).
+  useEffect(() => {
+    if (isRecording || !pendingRestartRef.current) return;
+    if (Date.now() - pendingRestartRef.current > 45_000) {
+      pendingRestartRef.current = 0;
+      return;
+    }
+    pendingRestartRef.current = 0;
+    sessionStorage.setItem('meetilyCompanionStart', 'true');
+    if (pathname === '/') {
+      window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
+    } else {
+      sessionStorage.setItem('autoStartRecording', 'true');
+      router.push('/');
+    }
   }, [isRecording, pathname, router]);
 
   // Function to search through meeting transcripts
@@ -337,30 +396,47 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
 
 
-  return (
-    <SidebarContext.Provider value={{
-      currentMeeting,
-      setCurrentMeeting,
-      sidebarItems,
-      isCollapsed,
-      toggleCollapse,
-      meetings,
-      setMeetings,
-      isMeetingActive,
-      setIsMeetingActive,
-      handleRecordingToggle,
-      searchTranscripts,
-      searchResults,
-      isSearching,
-      setServerAddress,
-      serverAddress,
-      transcriptServerAddress,
-      setTranscriptServerAddress,
-      startSummaryPolling,
-      stopSummaryPolling,
-      refetchMeetings: fetchMeetings,
+  const contextValue = useMemo(() => ({
+    currentMeeting,
+    setCurrentMeeting,
+    sidebarItems,
+    isCollapsed,
+    toggleCollapse,
+    meetings,
+    setMeetings,
+    isMeetingActive,
+    setIsMeetingActive,
+    handleRecordingToggle,
+    searchTranscripts,
+    searchResults,
+    isSearching,
+    setServerAddress,
+    serverAddress,
+    transcriptServerAddress,
+    setTranscriptServerAddress,
+    startSummaryPolling,
+    stopSummaryPolling,
+    refetchMeetings: fetchMeetings,
+  }), [
+    currentMeeting,
+    sidebarItems,
+    isCollapsed,
+    toggleCollapse,
+    meetings,
+    isMeetingActive,
+    handleRecordingToggle,
+    searchTranscripts,
+    searchResults,
+    isSearching,
+    serverAddress,
+    transcriptServerAddress,
+    startSummaryPolling,
+    stopSummaryPolling,
+    fetchMeetings,
+  ]);
 
-    }}>
+  return (
+    <SidebarContext.Provider value={contextValue}>
       {children}
     </SidebarContext.Provider>
   );

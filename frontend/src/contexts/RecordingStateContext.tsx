@@ -107,16 +107,24 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
     }
   };
 
+  const isRecordingRef = useRef(state.isRecording);
+  useEffect(() => {
+    isRecordingRef.current = state.isRecording;
+  }, [state.isRecording]);
+
   /**
    * Start polling backend state (called when recording starts)
    */
   const startPolling = () => {
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
     }
 
-    console.log('[RecordingStateContext] Starting state polling (500ms interval)');
-    pollingIntervalRef.current = setInterval(syncWithBackend, 500);
+    if (document.visibilityState === 'visible') {
+      console.log('[RecordingStateContext] Starting state polling (500ms interval)');
+      pollingIntervalRef.current = setInterval(syncWithBackend, 500);
+    }
   };
 
   /**
@@ -129,6 +137,23 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
       pollingIntervalRef.current = null;
     }
   };
+
+  // Visibility gating: clear interval on hide, restart on show with immediate refresh
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (isRecordingRef.current) {
+          syncWithBackend();
+          startPolling();
+        }
+      } else {
+        stopPolling();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   /**
    * Set up event listeners for backend state changes
@@ -242,13 +267,8 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
    * user is on. Pure UI feedback — no state mutation, no persisted-preference
    * writes.
    */
-  // Ref tracks latest isRecording for the mount-once listener below — the
-  // effect has [] deps so it can't read state directly (it would capture the
-  // initial value). Kept current by this small sync effect.
-  const isRecordingRef = useRef(false);
-  useEffect(() => {
-    isRecordingRef.current = state.isRecording;
-  }, [state.isRecording]);
+  // isRecordingRef declared above tracks latest isRecording for the mount-once listener below — the
+  // effect has [] deps so it can't read state directly (it would capture the initial value).
 
   useEffect(() => {
     // `cancelled` guard prevents leaking a listener when StrictMode/HMR runs

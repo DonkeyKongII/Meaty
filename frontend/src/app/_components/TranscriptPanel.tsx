@@ -50,9 +50,9 @@ export function TranscriptPanel({
   );
 
   return (
-    <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
+    <div className="w-full h-full border-r border-gray-200 bg-white flex flex-col min-h-0 overflow-hidden">
       {/* Title area - Sticky header */}
-      <div className="sticky top-0 z-10 bg-white p-4 border-gray-200">
+      <div className="shrink-0 bg-white p-4 border-gray-200">
         <div className="flex flex-col space-y-3">
           <div className="flex  flex-col space-y-2">
             <div className="flex justify-center  items-center space-x-2">
@@ -91,7 +91,7 @@ export function TranscriptPanel({
 
       {/* Permission Warning - Not needed on Linux */}
       {!isRecording && !isChecking && !isLinux && (
-        <div className="flex justify-center px-4 pt-4">
+        <div className="shrink-0 flex justify-center px-4 pt-4">
           <PermissionWarning
             hasMicrophone={hasMicrophone}
             hasSystemAudio={hasSystemAudio}
@@ -101,11 +101,12 @@ export function TranscriptPanel({
         </div>
       )}
 
-      {/* Transcript content */}
-      <div className="pb-20">
-        <div className="flex justify-center">
-          <div className="w-2/3 max-w-[750px]">
+      {/* Transcript content - bounded flex container for virtualization */}
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden pb-20">
+        <div className="flex justify-center flex-1 min-h-0">
+          <div className="w-2/3 max-w-[750px] flex flex-col flex-1 min-h-0">
             <VirtualizedTranscriptView
+              containerRef={transcriptContainerRef}
               segments={segments}
               isRecording={isRecording}
               isPaused={isPaused}

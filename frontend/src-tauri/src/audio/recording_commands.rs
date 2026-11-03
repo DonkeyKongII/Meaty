@@ -106,6 +106,32 @@ static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
 static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
 
+// While stop_recording drains the transcription queue, the manager has already
+// been taken out of RECORDING_MANAGER. The transcript listener falls back to
+// this sink so the draining backlog still lands in the saver's segment list
+// and makes it into the final transcripts.json.
+static SHUTDOWN_TRANSCRIPT_SINK: Mutex<
+    Option<Arc<Mutex<Vec<crate::audio::recording_saver::TranscriptSegment>>>>,
+> = Mutex::new(None);
+
+/// Append or update a segment in the sink's list, matching
+/// RecordingSaver::add_transcript_segment's upsert semantics.
+fn sink_add_segment(
+    sink: &Arc<Mutex<Vec<crate::audio::recording_saver::TranscriptSegment>>>,
+    segment: crate::audio::recording_saver::TranscriptSegment,
+) {
+    if let Ok(mut segments) = sink.lock() {
+        if let Some(existing) = segments
+            .iter_mut()
+            .find(|s| s.sequence_id == segment.sequence_id)
+        {
+            *existing = segment;
+        } else {
+            segments.push(segment);
+        }
+    }
+}
+
 const TRANSCRIPTION_RUNTIME_START_ERROR_CODE: &str =
     "TRANSCRIPTION_RUNTIME_INITIALIZATION_FAILED";
 const TRANSCRIPTION_RUNTIME_USER_MESSAGE: &str = "Speech recognition could not initialize. Restart Meetily. If the problem continues, repair or reinstall the app.";
@@ -454,10 +480,21 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                     sequence_id: update.sequence_id,
                 };
 
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
+                // Save to recording manager; during shutdown the manager is
+                // already taken, so fall back to the drain sink.
+                let saved = matches!(
+                    RECORDING_MANAGER.lock().ok().and_then(|g| {
+                        g.as_ref().map(|m| {
+                            m.add_transcript_segment(segment.clone());
+                        })
+                    }),
+                    Some(())
+                );
+                if !saved {
+                    if let Ok(sink_guard) = SHUTDOWN_TRANSCRIPT_SINK.lock() {
+                        if let Some(sink) = sink_guard.as_ref() {
+                            sink_add_segment(sink, segment.clone());
+                        }
                     }
                 }
             }
@@ -642,10 +679,21 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                     sequence_id: update.sequence_id,
                 };
 
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
+                // Save to recording manager; during shutdown the manager is
+                // already taken, so fall back to the drain sink.
+                let saved = matches!(
+                    RECORDING_MANAGER.lock().ok().and_then(|g| {
+                        g.as_ref().map(|m| {
+                            m.add_transcript_segment(segment.clone());
+                        })
+                    }),
+                    Some(())
+                );
+                if !saved {
+                    if let Ok(sink_guard) = SHUTDOWN_TRANSCRIPT_SINK.lock() {
+                        if let Some(sink) = sink_guard.as_ref() {
+                            sink_add_segment(sink, segment.clone());
+                        }
                     }
                 }
             }
@@ -705,6 +753,13 @@ pub async fn stop_recording<R: Runtime>(
         global_manager.take()
     };
 
+    // The transcript listener stays registered until the queue has drained
+    // (Step 2.5); give it a fallback destination for the backlog while the
+    // manager is taken out of the global slot.
+    *SHUTDOWN_TRANSCRIPT_SINK.lock().unwrap() = manager_for_cleanup
+        .as_ref()
+        .map(|m| m.transcript_segments_handle());
+
     // Mark the stop tail as in progress so a mic-disconnect fallback that was
     // queued before Stop short-circuits instead of retrying against the taken
     // manager. IS_RECORDING itself stays true until the tail completes — the
@@ -733,16 +788,6 @@ pub async fn stop_recording<R: Runtime>(
         Err(e) => {
             error!("❌ Failed to stop audio streams: {}", e);
             return Err(format!("Failed to stop audio streams: {}", e)); // _stopping_guard clears on return
-        }
-    }
-
-    // Step 1.5: Clean up transcript listener to release microphone
-    // Unlisten transcript-update event to prevent lingering references
-    {
-        use tauri::Listener;
-        if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
-            app.unlisten(listener_id);
-            info!("✅ Transcript-update listener removed");
         }
     }
 
@@ -810,6 +855,19 @@ pub async fn stop_recording<R: Runtime>(
         progress_task.abort();
     } else {
         info!("ℹ️ No transcription task found to wait for");
+    }
+
+    // Step 2.5: Remove the transcript listener only AFTER the transcription queue
+    // has fully drained. Unlistening earlier drops every segment transcribed from
+    // the final backlog - the tail of each meeting would go missing from
+    // transcripts.json.
+    {
+        use tauri::Listener;
+        if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
+            app.unlisten(listener_id);
+            info!("✅ Transcript-update listener removed (after queue drain)");
+        }
+        *SHUTDOWN_TRANSCRIPT_SINK.lock().unwrap() = None;
     }
 
     // Step 3: Now safely unload Whisper model after ALL chunks are processed

@@ -59,6 +59,9 @@ export function TranscriptPanel({
 
   const [assignTarget,setAssignTarget]=useState<{id:string;name:string}|null>(null);
 
+  // In-meeting transcript search: filters the visible segments to matches.
+  const [searchQuery, setSearchQuery] = useState('');
+
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -75,6 +78,12 @@ export function TranscriptPanel({
     }));
   }, [transcripts, usePagination, segments]);
 
+  const visibleSegments = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return convertedSegments;
+    return convertedSegments.filter(segment => segment.text.toLowerCase().includes(query));
+  }, [convertedSegments, searchQuery]);
+
   return (
     <div className="meaty-transcript flex h-full min-w-0 w-full bg-white flex-col relative @container">
       {/* Title area */}
@@ -88,6 +97,23 @@ export function TranscriptPanel({
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
         />
+        {convertedSegments.length > 0 && (
+          <div className="mt-3 flex items-center gap-2">
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search this transcript…"
+              aria-label="Search this transcript"
+              className="flex-1 min-w-0 px-3 py-1.5 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            />
+            {searchQuery.trim() && (
+              <span className="text-xs text-gray-500 whitespace-nowrap">
+                {visibleSegments.length} of {convertedSegments.length}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {meetingId&&!isRecording&&<MeetingPipelineStatus meetingId={meetingId}/>}
@@ -98,8 +124,22 @@ export function TranscriptPanel({
       {assignTarget&&meetingId&&<SpeakerAssignment key={`${meetingId}:${assignTarget.id}`} meetingId={meetingId} target={assignTarget} data={speakerData} onClose={()=>setAssignTarget(null)} onSave={value=>{setSpeakerData(value);window.dispatchEvent(new CustomEvent('speaker-labels-saved',{detail:{meetingId,value}}));}}/>}
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
+        {searchQuery.trim() && visibleSegments.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center p-8 text-sm text-gray-500 text-center">
+            <p>No matches in the {convertedSegments.length} loaded segments{hasMore && totalCount ? ` of ${totalCount}` : ''}.</p>
+            {hasMore && onLoadMore && (
+              <button
+                onClick={onLoadMore}
+                disabled={isLoadingMore}
+                className="mt-3 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {isLoadingMore ? 'Loading…' : 'Load earlier segments to keep searching'}
+              </button>
+            )}
+          </div>
+        ) : (
         <VirtualizedTranscriptView
-          segments={convertedSegments}
+          segments={visibleSegments}
           onAssignSpeaker={meetingId&&!isRecording&&!['queued','running'].includes(speakerData?.job_status||'')?setAssignTarget:undefined}
           speakerTags={meetingId&&!isRecording?Object.fromEntries(convertedSegments.map(segment=>[segment.id,speakerTags(speakerData,segment.timestamp,segment.endTime)])):undefined}
           speakerLabels={Object.fromEntries(convertedSegments.map(segment => [segment.id, segment.audioTimestampKnown === false ? undefined : speakerLabel(speakerData, segment.timestamp, segment.endTime)]))}
@@ -116,6 +156,7 @@ export function TranscriptPanel({
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
         />
+        )}
       </div>
 
       {/* Custom prompt input at bottom of transcript section */}

@@ -519,6 +519,15 @@ impl RecordingManager {
         self.recording_saver.add_transcript_segment(segment);
     }
 
+    /// Handle to the saver's shared segment list. stop_recording installs it
+    /// as the transcript listener's fallback destination while the manager is
+    /// taken out of the global slot for shutdown.
+    pub fn transcript_segments_handle(
+        &self,
+    ) -> Arc<std::sync::Mutex<Vec<super::recording_saver::TranscriptSegment>>> {
+        self.recording_saver.transcript_segments_handle()
+    }
+
     /// Add a transcript chunk to be saved later (legacy method)
     pub fn add_transcript_chunk(&self, text: String) {
         self.recording_saver.add_transcript_chunk(text);

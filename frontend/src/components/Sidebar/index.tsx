@@ -62,6 +62,16 @@ const Sidebar: React.FC = () => {
   const { betaFeatures } = useConfig();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
+
+  // Debounce search query changes by ~200ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
@@ -237,29 +247,35 @@ const Sidebar: React.FC = () => {
   };
 
   // Handle search input changes
-  const handleSearchChange = useCallback(async (value: string) => {
+  const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
-
-    // If search query is empty, just return to normal view
-    if (!value.trim()) return;
-
-    // Search through transcripts
-    await searchTranscripts(value);
-
-    // Make sure the meetings folder is expanded when searching
-    if (!expandedFolders.has('meetings')) {
-      const newExpanded = new Set(expandedFolders);
-      newExpanded.add('meetings');
-      setExpandedFolders(newExpanded);
+    if (!value.trim()) {
+      setDebouncedSearchQuery('');
     }
-  }, [expandedFolders, searchTranscripts]);
+  }, []);
+
+  // Execute transcript search and folder expansion when debounced query updates
+  useEffect(() => {
+    const trimmed = debouncedSearchQuery.trim();
+    if (!trimmed) return;
+
+    void searchTranscripts(trimmed);
+
+    if (!expandedFolders.has('meetings')) {
+      setExpandedFolders(prev => {
+        const newExpanded = new Set(prev);
+        newExpanded.add('meetings');
+        return newExpanded;
+      });
+    }
+  }, [debouncedSearchQuery, searchTranscripts, expandedFolders]);
 
   // Combine search results with sidebar items
   const filteredSidebarItems = useMemo(() => {
-    if (!searchQuery.trim()) return sidebarItems;
+    if (!debouncedSearchQuery.trim()) return sidebarItems;
 
     const matched = new Set(searchResults.map(result => result.id));
-    const query = searchQuery.toLowerCase();
+    const query = debouncedSearchQuery.toLowerCase();
     const filter = (item: SidebarItem): SidebarItem | undefined => {
       if (item.title.toLowerCase().includes(query) || matched.has(item.id)) return item;
       if (item.children) {
@@ -269,7 +285,7 @@ const Sidebar: React.FC = () => {
       return undefined;
     };
     return sidebarItems.map(filter).filter((v): v is SidebarItem => !!v);
-  }, [sidebarItems, searchQuery, searchResults]);
+  }, [sidebarItems, debouncedSearchQuery, searchResults]);
 
 
   const handleDelete = async (itemId: string) => {
@@ -511,6 +527,17 @@ const Sidebar: React.FC = () => {
     const isActive = item.type === 'file' && currentMeeting?.id === item.id;
     const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
 
+    const handleItemActivate = () => {
+      if (item.type === 'folder') {
+        toggleFolder(item.id);
+      } else {
+        setCurrentMeeting({ id: item.id, title: item.title });
+        const basePath = item.id.startsWith('intro-call') ? '/' :
+          `/meeting-details?id=${item.id}`;
+        router.push(basePath);
+      }
+    };
+
     // Check if this item has a matching transcript snippet
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
     const hasTranscriptMatch = !!matchingResult;
@@ -529,14 +556,15 @@ const Sidebar: React.FC = () => {
             } cursor-pointer`
             }`}
           style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft: item.type === 'file' ? '12px' : paddingLeft }}
-          onClick={() => {
-            if (item.type === 'folder') {
-              toggleFolder(item.id);
-            } else {
-              setCurrentMeeting({ id: item.id, title: item.title });
-              const basePath = item.id.startsWith('intro-call') ? '/' :
-                item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
-              router.push(basePath);
+          onClick={handleItemActivate}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            // Keyboard activation; ignore keys bubbling from the row's
+            // edit/delete buttons so Enter there does not also navigate.
+            if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+              e.preventDefault();
+              handleItemActivate();
             }
           }}
         >
@@ -718,13 +746,12 @@ const Sidebar: React.FC = () => {
           <div className="flex-shrink-0 p-2 border-t border-gray-100">
             <button
               onClick={handleRecordingToggle}
-              disabled={isRecording}
-              className={`w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-white ${isRecording ? 'bg-red-300 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-lg transition-colors shadow-sm`}
+              className={`w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-white ${isRecording ? 'bg-red-600 hover:bg-red-700' : 'bg-red-500 hover:bg-red-600'} rounded-lg transition-colors shadow-sm`}
             >
               {isRecording ? (
                 <>
                   <Square className="w-4 h-4 mr-2" />
-                  <span>Recording in progress...</span>
+                  <span>Stop Recording</span>
                 </>
               ) : (
                 <>

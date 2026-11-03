@@ -17,10 +17,19 @@ export function MeetingContextPanel({meetingId}: {meetingId:string}) {
   const call = (request:object) => invoke<any>('meeting_context_action',{request});
   useEffect(()=>{
     let active=true;
+    let timer:NodeJS.Timeout|null=null;
     const load=()=>call({action:'get',meeting_id:meetingId}).then(value=>{if(active)setData(value);}).catch(e=>{if(active)setError(String(e));});
-    setData(null); setEditing(false); setError(''); load();
-    const timer=setInterval(load,15000);
-    return()=>{active=false;clearInterval(timer);};
+    setData(null); setEditing(false); setError('');
+    const startPolling=()=>{
+      if(timer)clearInterval(timer);
+      void load();
+      timer=setInterval(load,15000);
+    };
+    const stopPolling=()=>{if(timer){clearInterval(timer);timer=null;}};
+    const onVisibilityChange=()=>{if(document.visibilityState==='visible'){startPolling();}else{stopPolling();}};
+    if(document.visibilityState==='visible'){startPolling();}
+    document.addEventListener('visibilitychange',onVisibilityChange);
+    return()=>{active=false;stopPolling();document.removeEventListener('visibilitychange',onVisibilityChange);};
   },[meetingId]);
   async function edit() {
     try {

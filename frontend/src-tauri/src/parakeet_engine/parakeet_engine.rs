@@ -553,9 +553,9 @@ impl ParakeetEngine {
             duration_seconds
         );
 
-        // Transcribe using Parakeet model
-        let result = model
-            .transcribe_samples(audio_data)
+        // Transcribe using Parakeet model. The ONNX run blocks; keep it off
+        // the async worker so audio capture and UI tasks are not stalled.
+        let result = tokio::task::block_in_place(|| model.transcribe_samples(audio_data))
             .map_err(|e| anyhow!("Parakeet transcription failed: {}", e))?;
 
         log::debug!("Parakeet transcription result: '{}'", result.text);

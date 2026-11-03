@@ -68,11 +68,15 @@ pub fn start<R: tauri::Runtime>(
                                 c.observe(session,count,std::time::Instant::now());
                             }
                         }
-                        if message["event"] == "participants" {return true;}
+                        // "participants" heartbeats feed the session tracker too:
+                        // they refresh the heartbeat deadline, and one for a session
+                        // the app does not know (app restarted mid-call) must
+                        // auto-start like a join, or auto-start is starved for the
+                        // rest of the call.
                         let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
                         state.get_or_insert_with(Default::default).update(
                             session,
-                            message["event"] == "joined",
+                            message["event"] != "ended",
                             std::time::Instant::now(),
                         );
                         true

@@ -617,7 +617,9 @@ impl WhisperEngine {
             // let _suppressor = crate::whisper_engine::StderrSuppressor::new();
 
             let mut state = ctx.create_state()?;
-            state.full(params, &audio_data)?;
+            // Keep the blocking inference off the async worker (this is the
+            // live transcription path used by WhisperProvider).
+            tokio::task::block_in_place(|| state.full(params, &audio_data))?;
             let num_segments = state.full_n_segments();
 
             (num_segments, state)
@@ -772,7 +774,11 @@ impl WhisperEngine {
                       transcription_count, audio_data.len(), duration_seconds);
         }
         let mut state = ctx.create_state()?;
-        state.full(params, &audio_data)?;
+        // full() blocks for 100ms-1s+; run it off the async worker so the
+        // runtime keeps scheduling audio capture, VAD and UI work. Tauri uses
+        // a multi-thread runtime, so block_in_place hands this thread's other
+        // tasks to a fresh worker instead of stalling them.
+        tokio::task::block_in_place(|| state.full(params, &audio_data))?;
 
         // Extract text with improved segment handling
         let num_segments = state.full_n_segments()?;

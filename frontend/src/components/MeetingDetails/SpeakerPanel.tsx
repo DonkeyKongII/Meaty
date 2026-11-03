@@ -36,12 +36,23 @@ export function SpeakerPanel({meetingId, disabled, onChange}: {
   },[meetingId,onChange]);
   useEffect(()=>{
     let active=true;
+    let timer:NodeJS.Timeout|null=null;
     const refresh=()=>invoke<SpeakerAnalysis>('speaker_action',{meetingId,action:'get'}).then(result=>{
       if(active&&!busy){setData(result);onChange(result);}
     }).catch(()=>{});
     const listener=listen<string>('speaker-analysis-updated',event=>{if(event.payload===meetingId)void refresh();});
-    const timer=setInterval(()=>{if(data?.job_status==='queued'||data?.job_status==='running')void refresh();},5000);
-    return()=>{active=false;clearInterval(timer);void listener.then(unlisten=>unlisten());};
+    const startPolling=()=>{
+      if(timer)clearInterval(timer);
+      if(data?.job_status==='queued'||data?.job_status==='running'){
+        void refresh();
+        timer=setInterval(()=>{if(data?.job_status==='queued'||data?.job_status==='running')void refresh();},5000);
+      }
+    };
+    const stopPolling=()=>{if(timer){clearInterval(timer);timer=null;}};
+    const onVisibilityChange=()=>{if(document.visibilityState==='visible'){startPolling();}else{stopPolling();}};
+    if(document.visibilityState==='visible'){startPolling();}
+    document.addEventListener('visibilitychange',onVisibilityChange);
+    return()=>{active=false;stopPolling();document.removeEventListener('visibilitychange',onVisibilityChange);void listener.then(unlisten=>unlisten());};
   },[meetingId,onChange,busy,data?.job_status]);
   useEffect(()=>{
     const update=(event:Event)=>{const d=(event as CustomEvent).detail;if(d.meetingId===meetingId){setData(d.value);onChange(d.value);}};

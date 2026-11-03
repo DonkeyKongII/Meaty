@@ -155,7 +155,7 @@ export function PreferenceSettings() {
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Notifications</h3>
             <p className="text-sm text-gray-600">Enable or disable notifications of start and end of meeting</p>
           </div>
-          <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
+          <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} aria-label="Notifications" />
         </div>
       </div>
 
