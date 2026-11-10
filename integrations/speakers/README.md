@@ -1,14 +1,14 @@
 # Persistent local speaker recognition
 
-This feature adds post-recording diarization and explicitly enrolled voice profiles to Meetily Community Edition. It runs locally, with no inference API, meeting bot, or audio upload. It is implemented alongside Google Meet auto start on branch `feat/meeting-autostart`.
+This feature adds post-recording diarization and explicitly enrolled voice profiles to Meaty. It runs locally, with no inference API, meeting bot, or audio upload. It is implemented alongside Google Meet auto start on branch `feat/meeting-autostart`.
 
 ## Use
 
-1. Open a saved meeting's Transcript tab and expand **Speakers**.
+1. Open a saved meeting's **Meeting Details** tab and find **Speakers**.
 2. Choose **Detect speakers**. For meetings, provide the known number of people who spoke (1–20). Leaving it blank uses experimental automatic clustering, which can over-split voices.
 3. Listen to each sample and enter a name. **Save speaker** names the group for that meeting.
 4. Check **Remember this voice in future meetings** to explicitly enroll a reusable profile. At least eight seconds of clear speech and a consistent voice group are required. Choose an existing person from the dropdown to explicitly replace that person's reference with the current voice.
-5. Automatic analysis of newly opened meetings is now off by default; explicitly opt in with the experimental checkbox in the Speakers panel. Existing explicit opt-ins are retained. Saved profiles are matched whenever analysis runs. It waits while Meetily is recording and will attempt each meeting only once per view session; manual retry remains available.
+5. Newly saved recordings queue automatic speaker analysis. Saved profiles are matched when analysis runs. Jobs wait while Meaty is recording, and failed analyses can be retried manually with **Detect speakers**.
 6. Rename or delete saved profiles in **Saved voice profiles**. Deleting removes the reference vector and linked per-meeting enrollment vectors, while preserving historical labels, meeting recordings, and playback samples.
 
 Names appear above timestamped transcript chunks. Chunks containing material portions of multiple speaker turns display multiple names. Legacy transcript rows without recording-relative timestamps are left unlabeled. These annotations do not yet change summary generation or transcript-copy/export output.
@@ -41,7 +41,7 @@ The installer creates an isolated Python environment and downloads hash-verified
 
 Profiles and meeting results are stored in `voices.sqlite` (mode 0600) inside the private runtime directory (mode 0700). Playback samples are local WAV files. Keep this directory in backups if you want profiles to survive deletion of the app's data. This initial implementation is local for one Mac; no profile sync or dedicated profile export is included.
 
-The application bundles `speaker_runtime/worker.py`; Rust launches it through the isolated interpreter and serializes jobs. No changes to the main meeting database schema are required. The worker decodes audio through Meetily's bundled FFmpeg and caps recordings at six hours. Analysis can take minutes for long meetings and currently has no cancel control.
+The application bundles `speaker_runtime/worker.py`; Rust launches it through the isolated interpreter and serializes jobs. No changes to the main meeting database schema are required. The worker decodes audio through Meaty's bundled FFmpeg and caps recordings at six hours. Analysis can take minutes for long meetings and currently has no cancel control.
 
 ## Models and attribution
 

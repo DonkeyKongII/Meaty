@@ -1,275 +1,90 @@
-<div align="center" style="border-bottom: none">
-    <h1>
-        <img src="docs/Meetily-6.png" style="border-radius: 10px;" />
-        <br>
-        Privacy-First AI Meeting Assistant
-    </h1>
-    <a href="https://trendshift.io/repositories/21958" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21958" alt="Zackriya-Solutions%2Fmeetily | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-    <br>
-    <br>
-    <a href="https://github.com/Zackriya-Solutions/meetily/releases/"><img src="https://img.shields.io/badge/Pre_Release-Link-brightgreen" alt="Pre-Release"></a>
-    <a href="https://github.com/Zackriya-Solutions/meetily/releases"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/Zackriya-Solutions/meetily?style=flat">
-</a>
- <a href="https://github.com/Zackriya-Solutions/meetily/releases"> <img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/github/downloads/Zackriya-Solutions/meetily/total?style=plastic"> </a>
-    <a href="https://github.com/Zackriya-Solutions/meetily/releases"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"></a>
-    <a href="https://github.com/Zackriya-Solutions/meetily/releases"><img src="https://img.shields.io/badge/Supported_OS-macOS,_Windows-white" alt="Supported OS"></a>
-    <a href="https://github.com/Zackriya-Solutions/meetily/releases"><img alt="GitHub Tag" src="https://img.shields.io/github/v/tag/Zackriya-Solutions/meetily?include_prereleases&color=yellow">
-</a>
-    <br>
-    <h3>
-    <br>
-    Open Source • Privacy-First • Enterprise-Ready
-    </h3>
-    <p align="center">
-    Get latest <a href="https://www.zackriya.com/meetily-subscribe/"><b>Product updates</b></a> <br><br>
-    <a href="https://meetily.ai"><b>Website</b></a> •
-    <a href="https://www.linkedin.com/company/106363062/"><b>LinkedIn</b></a> •
-    <a href="https://discord.gg/crRymMQBFH"><b>Meetily Discord</b></a> •
-    <a href="https://discord.com/invite/vCFJvN4BwJ"><b>Privacy-First AI</b></a> •
-    <a href="https://www.reddit.com/r/meetily/"><b>Reddit</b></a>
-</p>
-    <p align="center">
-
-A privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on your infrastructure. Built by expert AI engineers passionate about data sovereignty and open source solutions. Perfect for enterprises that need advanced meeting intelligence without compromising on privacy, compliance, or control.
-
-</p>
-
-<p align="center">
-    <img src="docs/meetily_demo.gif" width="650" alt="Meetily Demo" />
-    <br>
-    <a href="https://youtu.be/6FnhSC_eSz8">View full Demo Video</a>
-</p>
-
+<div align="center">
+  <img src="frontend/public/meaty-mark.png" width="120" alt="Meaty ham logo" />
+  <h1>Meaty</h1>
+  <p>Get to the meat of it.</p>
+  <p>A local-first desktop app for recording conversations, cleaning up transcripts, and turning meetings into useful notes.</p>
+  <p><a href="https://github.com/DonkeyKongII/Meaty">Source</a> · <a href="https://github.com/DonkeyKongII/Meaty/pulls">Pull requests</a> · <a href="docs/BUILDING.md">Build from source</a> · <a href="LICENSE.md">MIT license</a></p>
 </div>
 
----
+## What Meaty does
 
-> **Meetily PRO Upgrade Offer** - Meetily PRO is available for users who need speaker identification, API, MCP and other integrations, advanced exports, custom summary workflows, and team-ready features. Use coupon code **LAUNCH20** for **20% off** until the next Meetily Community Edition release. Pro adds speaker identification (who said what), custom summary templates, PDF/DOCX export, and MCP, CLI and webhook integrations. [Explore Meetily PRO →](https://meetily.ai/pro/)
+- **Record microphone and system audio** through a native Tauri desktop app.
+- **Transcribe locally** with Whisper or Parakeet and display a provisional live transcript.
+- **Clean up after the meeting** by re-reading the saved audio with silence-aware chunks and overlapping context where needed.
+- **Summarize the cleaned transcript.** Both automatic and manual summary requests wait until the cleanup pass succeeds.
+- **Identify speakers** with local post-recording analysis and explicitly enrolled voice profiles.
+- **Organize meetings** with editable names, people and company assignments, transcript search, and speaker filters.
+- **Start and stop recording from Google Meet** through an optional Chrome companion on macOS.
+- **Choose a summary provider:** use local models or configure a supported cloud or OpenAI-compatible provider.
 
----
+## Recording and cleanup
 
-<details>
-<summary>Table of Contents</summary>
+1. Select your microphone, system audio, and local transcription model in Settings.
+2. Start recording manually, or configure the [Google Meet companion](integrations/chrome-google-meet/README.md).
+3. Follow the live transcript while the meeting is in progress. Text may arrive after speech pauses; this transcript is provisional.
+4. Stop recording. Meaty saves the recording and queues a full-audio cleanup pass that runs while the app is idle.
+5. Generate a summary, or let automatic summary generation continue. Summary generation uses the committed, cleaned transcript.
 
-- [Introduction](#introduction)
-- [Why Meetily?](#why-meetily)
-- [Features](#features)
-- [Installation](#installation)
-- [Key Features in Action](#key-features-in-action)
-- [System Architecture](#system-architecture)
-- [For Developers](#for-developers)
-- [Meetily PRO](#meetily-pro)
-- [Contributing](#contributing)
-- [License](#license)
+Cleanup jobs survive an app restart. If cleanup fails, the live transcript and audio are kept, the summary stays on hold, and the meeting offers **Retry transcript cleanup**. A backup of the live transcript is kept alongside the cleaned transcript. The second pass can improve coverage, but it is not a guarantee of perfect transcription.
 
-</details>
+### Audio retention
 
-## Introduction
+Meaty saves audio during recording so the cleanup pass can recover speech missed live.
 
-Meetily is a privacy-first AI meeting assistant that runs entirely on your local machine. It captures your meetings, transcribes them in real-time, and generates summaries with a local model by default. Audio and transcription never leave your device. If you choose a cloud AI provider for summaries, only the transcript text is sent to it. This makes it the perfect solution for professionals and enterprises who need to maintain complete control over their sensitive information.
+In **Settings → Recordings**, **Keep Audio After Processing** controls what happens afterward:
 
-## Why Meetily?
+- **On:** retain the recording after processing.
+- **Off:** delete the recording only after transcript cleanup and speaker analysis both succeed.
 
-While there are many meeting transcription tools available, this solution stands out by offering:
+A failed processing step keeps the audio available for retry. This workflow applies to new recordings; existing saved meetings are not automatically reprocessed or deleted.
 
-- **Privacy First:** All processing happens locally on your device.
-- **Cost-Effective:** Uses open-source AI models instead of expensive APIs.
-- **Flexible:** Works offline and supports multiple meeting platforms.
-- **Customizable:** Self-host and modify for your specific needs.
+### Privacy
 
-<details>
-
-Note: Official builds are only on meetily.ai and github.com/Zackriya-Solutions/meetily/releases.
-    
-<summary>The Privacy Problem</summary>
-
-Meeting AI tools create significant privacy and compliance risks across all sectors:
-
-- **$4.4M average cost per data breach** (IBM 2024)
-- **€5.88 billion in GDPR fines** issued by 2025
-- **400+ unlawful recording cases** filed in California this year
-
-Whether you're a defense consultant, enterprise executive, legal professional, or healthcare provider, your sensitive discussions shouldn't live on servers you don't control. Cloud meeting tools promise convenience but deliver privacy nightmares with unclear data storage practices and potential unauthorized access.
-
-**Meetily solves this:** Complete data sovereignty on your infrastructure, zero vendor lock-in, and full control over your sensitive conversations.
-
-</details>
-
-## Features
-
-- **Local First:** All processing is done on your machine. No data ever leaves your computer.
-- **Real-time Transcription:** Get a live transcript of your meeting as it happens.
-- **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
-- **Multi-Platform:** Native apps for Windows and macOS (Apple Silicon). On Linux, build from source.
-- **Open Source:** Meetily is open source and free to use.
-- **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
+Recordings, local transcription, speaker analysis, and the meeting database are stored on your device. If you choose a cloud summary provider, the transcript and configured meeting context are sent to that provider. Optional integrations can also export meeting content when configured. Usage analytics is off by default. See the [privacy policy](PRIVACY_POLICY.md) for details.
 
 ## Installation
 
-### 🪟 **Windows**
+Meaty is currently developed and verified on Apple Silicon macOS. The repository also contains inherited Windows and Linux build configurations; those platforms need separate validation for the fork's newer features. The Google Meet companion described here is for macOS and Chrome.
 
-1. Download the latest `x64-setup.exe` from [Releases](https://github.com/Zackriya-Solutions/meetily/releases/latest)
-2. Run the installer
+Build from source using the [build guide](docs/BUILDING.md). Any packaged Meaty releases will be listed under [this fork's releases](https://github.com/DonkeyKongII/Meaty/releases). Installation instructions for this fork should use its own builds.
 
-> **Windows compatibility:** The packaged installer uses a Vulkan-enabled Whisper build. It requires an AVX2-capable x64 CPU; AVX-512 is not required. CUDA acceleration requires a source build configured with a compatible NVIDIA CUDA toolchain.
+For a macOS app bundle, install **MEATY.app** in Applications and open it. Grant the microphone and system-audio permissions needed for the devices you select. Local models must be downloaded before first use.
 
-### 🍎 **macOS**
+## Development
 
-1. Download `meetily_0.4.1_aarch64.dmg` from [Releases](https://github.com/Zackriya-Solutions/meetily/releases/latest)
-2. Open the downloaded `.dmg` file
-3. Drag **Meetily** to your Applications folder
-4. Open **Meetily** from Applications folder
+Install Rust, Node.js, the platform's native build tools, and pnpm 9.15.9. On macOS, use full Xcode for native builds.
 
-### 🐧 **Linux**
-
-Build from source following our detailed guides:
-
-- [Building on Linux](docs/building_in_linux.md)
-- [General Build Instructions](docs/BUILDING.md)
-
-**Quick start:**
-
-```bash
-git clone https://github.com/Zackriya-Solutions/meetily
-cd meetily/frontend
+```sh
+git clone https://github.com/DonkeyKongII/Meaty.git
+cd Meaty/frontend
 pnpm install --frozen-lockfile
-./build-gpu.sh
+pnpm run tauri:dev
 ```
 
-## Key Features in Action
+Build a macOS application bundle:
 
-### 🎯 Local Transcription
+```sh
+pnpm exec tauri build --bundles app
+```
 
-Transcribe meetings entirely on your device using **Whisper** or **Parakeet** models. No cloud required.
+The Cargo workspace writes build output under the repository's `target/` directory. The macOS bundle is `target/release/bundle/macos/MEATY.app`.
 
-<p align="center">
-    <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Meetily Demo" />
-</p>
+See also:
 
-### 📥 Import & Enhance `Beta`
+- [Build instructions](docs/BUILDING.md)
+- [GPU acceleration](docs/GPU_ACCELERATION.md)
+- [Architecture](docs/architecture.md)
+- [Frontend development](frontend/README.md)
+- [Speaker recognition](integrations/speakers/README.md)
+- [Meeting context integration](integrations/meeting-context/WORKFLOW.md)
+- [Contributing](CONTRIBUTING.md)
 
-Import existing audio files to generate transcripts, or enhance to re-transcribe any recorded meeting with a different model or language, all processed locally.
+### Compatibility identifiers
 
-> Contributed by [Jeremi Joslin](https://github.com/jeremi), improved by [Vishnu P S](https://github.com/p-s-vishnu) and [Mohammed Safvan](https://github.com/mohammedsafvan)
+The displayed product name is Meaty; the macOS bundle is **MEATY.app**. Some internal identifiers retain their original spelling to preserve existing data and integrations, including `com.meetily.ai`, the `meetily` executable and Cargo package, `meetily-recordings`, the Chrome native-messaging host, and CI artifact names. Use the exact identifiers shown in commands and paths. See the [architecture guide](docs/architecture.md#storage-and-compatibility) for storage locations.
 
-<p align="center">
-    <img src="docs/meetily-export.gif" width="650" style="border-radius: 10px;" alt="Import and Enhance" />
-</p>
+## License and attribution
 
-### 🤖 AI-Powered Summaries
+Meaty is an independently maintained fork of [Meetily](https://github.com/Zackriya-Solutions/meetily) by Zackriya Solutions, distributed under the [MIT license](LICENSE.md). The original copyright and license notices are preserved. Dependencies and model files retain their respective licenses.
 
-Generate meeting summaries with your choice of AI provider. **Ollama** (local) is recommended, with support for Claude, Groq, OpenRouter, and OpenAI.
-
-<p align="center">
-    <img src="docs/summary.png" width="650" style="border-radius: 10px;" alt="Summary generation" />
-</p>
-
-<p align="center">
-    <img src="docs/editor1.png" width="650" style="border-radius: 10px;" alt="Editor Summary generation" />
-</p>
-
-### 🔒 Privacy-First Design
-
-All data stays on your machine. Transcription models, recordings, and transcripts are stored locally.
-
-<p align="center">
-    <img src="docs/settings.png" width="650" style="border-radius: 10px;" alt="Local Transcription and storage" />
-</p>
-
-### 🌐 Custom OpenAI Endpoint Support
-
-Use your own OpenAI-compatible endpoint for AI summaries. Perfect for organizations with custom AI infrastructure or preferred providers.
-
-<p align="center">
-    <img src="docs/custom.png" width="650" style="border-radius: 10px;" alt="Custom OpenAI Endpoint Configuration" />
-</p>
-
-### 🎙️ Professional Audio Mixing
-
-Capture microphone and system audio simultaneously with intelligent ducking and clipping prevention.
-
-<p align="center">
-    <img src="docs/audio.png" width="650" style="border-radius: 10px;" alt="Device selection" />
-</p>
-
-### ⚡ GPU Acceleration
-
-Acceleration depends on the platform and build you use:
-
-- **macOS packages:** Metal and CoreML are enabled automatically.
-- **Windows packages:** Whisper is built with Vulkan support.
-- **Linux:** Build from source with the acceleration configuration appropriate for your system.
-
-CUDA is available through an appropriately configured NVIDIA source build; the standard Windows installer does not select it automatically.
-
-## System Architecture
-
-Meetily is a single, self-contained application built with [Tauri](https://tauri.app/). It uses a Rust-based backend to handle all the core logic, and a Next.js frontend for the user interface.
-
-For more details, see the [Architecture documentation](docs/architecture.md).
-
-## For Developers
-
-If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
-
-## Meetily Pro
-
-<p align="center">
-    <img src="docs/pv2.1.png" width="650" style="border-radius: 10px;" alt="Upcoming version" />
-</p>
-
-**Meetily PRO** is a professional solution with advanced features for serious users and teams. 
-
-### Community Thank-You Offer
-
-Meetily Community Edition will remain **free and open source (MIT)**. PRO exists for users and teams who want a more advanced meeting workflow, including speaker identification, custom summary templates, advanced exports, auto-meeting detection, and AI assistant integrations (MCP, CLI, webhooks), and self-hosted deployment options for teams.
-
-For the community that helped Meetily grow, we are making the upgrade easier: use coupon code **LAUNCH20** for **20% off Meetily PRO** until the next Meetily Community Edition release.
-
-### Key Advantages Over Community Edition:
-
-- **Custom Summary Templates**: Tailor summaries to your specific workflow and needs
-- **Advanced Export Options**: PDF, DOCX, and Markdown exports with formatting
-- **Auto-detect and Join Meetings**: Automatic meeting detection and joining
-- **Speaker Identification**: Who said what, on your device, live and on imported audio
-- **Chat with Meetings**: AI-powered meeting insights and queries *(Coming Soon)*
-- **Calendar Integration**: Seamless integration with your calendar *(Coming Soon)*
-- **Self-Hosted Deployment**: Deploy on your own infrastructure for teams with our enterprise plan
-- **GDPR Compliance Built-In**: Privacy by design architecture with complete audit trails
-- **Priority Support**: Dedicated support for PRO users
-
-### Who is PRO for?
-
-- **Teams and organizations** (2-100 users) requiring self-hosted deployment
-- **Power users** who need advanced export formats and custom workflows
-- **Compliance-focused organizations** requiring GDPR readiness
-
-> **Note:** Meetily Community Edition remains **free & open source forever** (MIT) with local transcription, AI summaries, and core features. PRO is a separate professional solution for users who need enhanced accuracy and advanced capabilities.
-
-Pro is $10/user/month, billed annually, with a 14-day free trial.
-
-For organizations needing 100+ users or managed compliance solutions, explore [https://meetily.ai/](https://meetily.ai/pricing).
-
-**Learn more about pricing and features:** [https://meetily.ai/pro/](https://meetily.ai/pro/)
-
-## Contributing
-
-We welcome contributions from the community! If you have any questions or suggestions, please open an issue or submit a pull request. Please follow the established project structure and guidelines. For more details, refer to the [CONTRIBUTING.md](CONTRIBUTING.md) file.
-
-Thanks for all the contributions. Our community is what makes this project possible.
-
-## License
-
-MIT License - Feel free to use this project for your own purposes.
-
-## Acknowledgments
-
-- We borrowed some code from [Whisper.cpp](https://github.com/ggerganov/whisper.cpp).
-- We borrowed some code from [Screenpipe](https://github.com/mediar-ai/screenpipe).
-- We borrowed some code from [transcribe-rs](https://crates.io/crates/transcribe-rs).
-- Thanks to **NVIDIA** for developing the **Parakeet** model.
-- Thanks to [istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) for providing the **ONNX conversion** of the Parakeet model.
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=Zackriya-Solutions/meetily&type=date&legend=top-left)](https://www.star-history.com/?repos=Zackriya-Solutions%2Fmeetily&type=date&legend=bottom-right)
+Thanks also to the contributors and projects behind Whisper.cpp, Screenpipe, transcribe-rs, NVIDIA Parakeet, and its ONNX conversion by [istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx).

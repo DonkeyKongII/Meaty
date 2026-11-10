@@ -1,4 +1,4 @@
-# Meetily - Frontend
+# Meaty - Frontend
 
 A modern desktop application for recording, transcribing, and analyzing meetings with AI assistance. Built with Next.js and Tauri for a native desktop experience.
 
@@ -9,7 +9,7 @@ A modern desktop application for recording, transcribing, and analyzing meetings
 - Native desktop integration using Tauri
 - Speaker diarization support
 - Rich text editor for note-taking
-- Privacy-focused: All processing happens locally
+- Local transcription and speaker analysis, with local or configured cloud summary providers
 
 ## Prerequisites
 
@@ -63,8 +63,8 @@ Use `pnpm install --frozen-lockfile` to install the committed dependency set. Wh
 
 2. Clone the repository and navigate to the frontend directory:
    ```bash
-   git clone https://github.com/Zackriya-Solutions/meeting-minutes
-   cd meeting-minutes/frontend
+   git clone https://github.com/DonkeyKongII/Meaty
+   cd Meaty/frontend
    ```
   
 
@@ -83,8 +83,8 @@ Use `pnpm install --frozen-lockfile` to install the committed dependency set. Wh
 
 2. Clone the repository and navigate to the frontend directory:
    ```cmd
-   git clone https://github.com/Zackriya-Solutions/meeting-minutes
-   cd meeting-minutes/frontend
+   git clone https://github.com/DonkeyKongII/Meaty
+   cd Meaty/frontend
    ```
 
 3. Install dependencies:
@@ -131,7 +131,7 @@ pnpm run tauri:build
 
 ## Local Transcription
 
-Current Meetily does not require a separate FastAPI service, Docker backend, or manually started whisper-server process. Local transcription is handled by the Rust/Tauri desktop app.
+Current Meaty does not require a separate FastAPI service, Docker backend, or manually started whisper-server process. Local transcription is handled by the Rust/Tauri desktop app.
 
 For build and acceleration details, see:
 
@@ -175,4 +175,4 @@ For build and acceleration details, see:
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [license](../LICENSE.md) for details.

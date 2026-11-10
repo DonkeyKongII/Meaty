@@ -1,11 +1,10 @@
 # Legacy Backend API Archive
 
-This document previously described the Python/FastAPI API used by older
-Meetily backend releases.
+This document previously described the Python/FastAPI API inherited from the original project.
 
 ## Current Supported API Surface
 
-Meetily no longer supports the standalone FastAPI backend as the active
+Meaty no longer supports the standalone FastAPI backend as the active
 application API. The supported application is the Tauri desktop app, where the
 Next.js UI communicates with the Rust core through Tauri commands and events.
 

@@ -1,6 +1,6 @@
 # Google Meet auto start on macOS + Chrome
 
-This companion extension requests local Meetily recording after a visible joined-call control appears on a Google Meet meeting page. It does not capture audio itself, send a meeting bot, or send meeting data to a network service. Meetily uses its normal recording flow, selected devices, model checks, and recording indicator.
+This companion extension requests local Meaty recording after a visible joined-call control appears on a Google Meet meeting page. It does not capture audio itself, send a meeting bot, or send meeting data to a network service. Meaty uses its normal recording flow, selected devices, model checks, and recording indicator.
 
 ## Current status
 
@@ -14,11 +14,13 @@ This companion extension requests local Meetily recording after a visible joined
 
 ## Architecture
 
+The native-host name and bridge directory below are compatibility identifiers retained by Meaty.
+
 `content.js` detects a visible leave-call control (including the `call_end` icon for localized UI) on Google Meet meeting URLs. Pre-join camera/mic previews are ignored. A call session ID survives page reloads and rotates after the joined-call interface has been absent for more than five seconds.
 
 `background.js` checks the extension's enabled setting and deduplicates accepted call sessions. It uses Chrome native messaging with the host `ai.meetily.meeting_autostart`. The native host manifest permits only the extension ID derived from the committed manifest key.
 
-`native-host.py` validates and frames messages, starts the explicitly configured custom app if needed (defaults to `/Applications/meetily.app`), and sends a request over the app's private Unix socket. The socket is mode 0600 and has no TCP port. Native host responses acknowledge the queued request, not successful audio recording. Missing models or denied permissions are displayed by Meetily's existing recording UI.
+`native-host.py` validates and frames messages, starts the explicitly configured custom app if needed (the legacy fallback is `/Applications/meetily.app`; configure `/Applications/MEATY.app` for Meaty), and sends a request over the app's private Unix socket. The socket is mode 0600 and has no TCP port. Native host responses acknowledge the queued request, not successful audio recording. Missing models or denied permissions are displayed by Meaty's existing recording UI.
 
 The Rust bridge tracks joined call sessions and queues start/stop actions. End notifications cancel pending starts; stopping waits eight seconds after the last active call ends. A reconnect cancels that stop. The frontend marks ownership only after a companion start succeeds and clears it on the recording-stopped event, then routes automatic stops through the normal Stop button save flow. The mounted frontend consumes requests and uses the existing sidebar recording flow. A manually stopped recording stays stopped for that accepted call session while the app/extension session remains alive. Restarting the app/browser or disabling/re-enabling/reloading the extension can reset this suppression.
 
@@ -43,17 +45,17 @@ The custom build disables official updater endpoints and updater artifact signin
 
 ## Install after the app build succeeds
 
-1. Quit the installed Meetily app. Preserve `~/Library/Application Support/com.meetily.ai`, which contains recordings, models, and settings. Install the newly built `meetily.app` at `/Applications/meetily.app`.
+1. Quit the installed Meaty app. Preserve `~/Library/Application Support/com.meetily.ai`, which contains recordings, models, and settings. Install the newly built `MEATY.app` at `/Applications/MEATY.app`.
 2. Install the native host for your account:
 
    ```sh
-   /usr/bin/python3 integrations/chrome-google-meet/install-host.py
+   /usr/bin/python3 integrations/chrome-google-meet/install-host.py --app /Applications/MEATY.app
    ```
 
 3. In Chrome, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this directory. Keep the directory in place. The extension's fixed ID is in `extension-id.txt`.
 4. Open the extension popup. The **Record when I join Google Meet** switch defaults to enabled. Reload any Google Meet tabs that were already open before installation.
-5. Join a test call and check Meetily's recording indicator. macOS may require renewed microphone and system-audio permissions for the custom build.
-6. Leave the call or close its tab. After about eight seconds, verify Meetily stops and saves through its normal workflow. Manual stopping remains available.
+5. Join a test call and check Meaty's recording indicator. macOS may require renewed microphone and system-audio permissions for the custom build.
+6. Leave the call or close its tab. After about eight seconds, verify Meaty stops and saves through its normal workflow. Manual stopping remains available.
 
 ## Validation
 
@@ -64,14 +66,14 @@ cd frontend
 npx --yes pnpm@9.15.9 exec tsc --noEmit
 ```
 
-Live acceptance checks: pre-join does not start recording; joining starts exactly one recording; muting does not restart/stop it; leaving/ending or closing the last call tab stops and saves; a brief reconnect does not stop; a manually started recording is not stopped by a meeting end; manually stopping does not restart it on heartbeat or page reload; leaving and rejoining starts a new recording when idle; disabled extension does not launch/start Meetily; app closed at join launches it; missing model and denied audio permissions display actionable errors.
+Live acceptance checks: pre-join does not start recording; joining starts exactly one recording; muting does not restart/stop it; leaving/ending or closing the last call tab stops and saves; a brief reconnect does not stop; a manually started recording is not stopped by a meeting end; manually stopping does not restart it on heartbeat or page reload; leaving and rejoining starts a new recording when idle; disabled extension does not launch/start Meaty; app closed at join launches it; missing model and denied audio permissions display actionable errors.
 
 Google can change its meeting UI. If detection stops working, update the content detector and verify against a live test meeting.
 
 ## Uninstall companion
 
-Remove the extension in Chrome. Remove the native host manifest at `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/ai.meetily.meeting_autostart.json` and the `~/Library/Application Support/MeetilyMeetingBridge` directory. Your Meetily recordings and settings are separate and should be retained.
+Remove the extension in Chrome. Remove the native host manifest at `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/ai.meetily.meeting_autostart.json` and the `~/Library/Application Support/MeetilyMeetingBridge` directory. Your Meaty recordings and settings are separate and should be retained.
 
-To select a custom app outside Applications, run `python3 integrations/chrome-google-meet/install-host.py --app /absolute/path/meetily.app`. The host preserves this target in its local config file.
+To select a custom app outside Applications, run `python3 integrations/chrome-google-meet/install-host.py --app /absolute/path/MEATY.app`. The host preserves this target in its local config file.
 
 Version 0.1.1 also detects instant-meeting URLs under `/meet/<meeting-code>`. After updating an unpacked extension, reload it in Chrome Extensions, then reload/rejoin the Meet page. Prejoin and the post-call Rejoin screen still do not trigger recording.

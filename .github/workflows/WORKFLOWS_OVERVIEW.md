@@ -1,6 +1,6 @@
 # GitHub Actions Workflows Overview
 
-This document provides a quick overview of all available CI/CD workflows in this repository.
+This document provides a quick overview of the CI/CD workflows included in Meaty. Artifact prefixes and secret names shown below retain their legacy spelling to match the workflow configuration.
 
 **Note:** All workflows in this repository use **manual triggers only** (`workflow_dispatch`). There are no automatic triggers from push or pull request events.
 

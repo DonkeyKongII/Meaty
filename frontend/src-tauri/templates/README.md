@@ -45,11 +45,11 @@ Each template JSON file follows this schema:
 
 ## Custom Templates
 
-Users can add custom templates to the application data directory:
+Users can add custom templates to the legacy template directory retained by Meaty. These exact paths are compatibility identifiers:
 
 - **macOS**: `~/Library/Application Support/Meetily/templates/`
 - **Windows**: `%APPDATA%\Meetily\templates\`
-- **Linux**: `~/.config/Meetily/templates/`
+- **Linux**: `~/.local/share/Meetily/templates/`
 
 Custom templates override built-in templates with the same filename.
 

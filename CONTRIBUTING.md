@@ -1,36 +1,35 @@
-# Contributing to Meeting Minutes Updates
+# Contributing to Meaty
 
-Thank you for your interest in contributing to Meetily! This document provides guidelines and instructions for contributing to this project.
+Thank you for your interest in contributing to Meaty! This document provides guidelines and instructions for contributing to this project.
 
 ## Development Workflow
 
 ### Branch Strategy
 
 - `main` - Production branch
-- `devtest` - Development and testing branch
-- Feature branches should be created from `devtest`
+- `feat/meeting-autostart` - Current Meaty development branch
+- Create feature branches from the branch your pull request targets
 
 ### Getting Started
 
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/meeting-minutes.git
+   git clone https://github.com/YOUR_USERNAME/Meaty.git
    ```
-3. Add the original repository as upstream:
+3. Add the Meaty repository as upstream:
    ```bash
-   git remote add upstream https://github.com/Zackriya-Solutions/meeting-minutes.git
+   git remote add upstream https://github.com/DonkeyKongII/Meaty.git
    ```
-4. Create a new branch from `devtest`:
+4. Create a new branch from the current development branch:
    ```bash
-   git checkout devtest
-   git pull upstream devtest
-   git checkout -b feature/your-feature-name
+   git fetch upstream
+   git checkout -b feature/your-feature-name upstream/feat/meeting-autostart
    ```
 
 ### Development Process
 
-1. Always start your work from the `devtest` branch
+1. Start from the branch your pull request targets
 2. Create a new branch for each feature/fix
 3. Make your changes
 4. Write or update tests as needed
@@ -41,8 +40,8 @@ Thank you for your interest in contributing to Meetily! This document provides g
 
 Before starting work on a new feature or bug fix:
 
-1. Check if an issue already exists
-2. If not, create a new issue with:
+1. If issue tracking is enabled, check if an issue already exists
+2. Use an issue, or the pull request description when issues are disabled, to provide:
    - Clear title
    - Detailed description
    - Steps to reproduce (for bugs)
@@ -52,13 +51,13 @@ Before starting work on a new feature or bug fix:
 
 ### Pull Request Process
 
-1. Create a PR from your feature branch to `devtest`
+1. Create a PR from your feature branch to the current development branch
 2. Link the PR to the related issue using the issue number (e.g., "Fixes #123")
 3. Fill out the PR template completely
 4. Ensure CI checks pass
 5. Request review from at least one maintainer
 6. Address any review comments
-7. Once approved, the PR will be merged into `devtest`
+7. Once approved, the PR will be merged into the current development branch
 
 ### PR Template
 
@@ -138,15 +137,13 @@ Types:
 
 1. PRs require at least one review
 2. Address all review comments
-3. Keep the PR up to date with `devtest`
+3. Keep the PR up to date with the target branch
 4. Squash commits if requested
 
 ## Getting Help
 
-- Create an issue for questions
-- Join our community chat
-- Contact maintainers
+- Ask project questions in a [Meaty pull request](https://github.com/DonkeyKongII/Meaty/pulls) or through the repository owner’s GitHub profile.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the project's MIT License. 
+By contributing, you agree that your contributions will be licensed under the project's MIT License.
