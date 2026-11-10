@@ -64,3 +64,50 @@ class AssignmentTests(unittest.TestCase):
   reopened=self.call('get');self.assertIsNone(reopened['analysis_warning']);self.assertEqual(len(reopened['speakers']),3)
   self.assertEqual(self.samples(),0)
   self.assertEqual(len([s for s in reopened['speakers'] if s['name']=='Alice']),2)
+
+ def test_assignment_matches_other_unknown_voices_without_learning_from_them(self):
+  self.analyze()
+  key=hashlib.sha256(b'one').hexdigest()
+  with sqlite3.connect(Path(self.root)/'voices.sqlite') as db:
+   value=json.loads(db.execute('select data from meetings where id=?',(key,)).fetchone()[0])
+   extra=dict(value['speakers'][0],id='1',embedding=[.99,.01]);value['speakers'].append(extra)
+   db.execute('update meetings set data=? where id=?',(json.dumps(value),key))
+  result=self.call('assign',speaker_id='0',name='Alice',remember=True)
+  self.assertEqual(result['speakers'][1]['status'],'recognized')
+  self.assertEqual(result['speakers'][0]['profile_id'],result['speakers'][1]['profile_id'])
+  self.assertEqual(self.samples(),1)
+
+ def test_expected_count_allows_extra_distinct_voices_and_fewer_attendees(self):
+  voices=[{'embedding':[1.,0.,0.],'clean_seconds':12},{'embedding':[0.,1.,0.],'clean_seconds':12},{'embedding':[0.,0.,1.],'clean_seconds':12}]
+  self.assertEqual(worker.estimate_speaker_count(voices,2),3)
+  self.assertEqual(worker.estimate_speaker_count(voices[:1],4),1)
+  self.assertEqual(worker.estimate_speaker_count(voices+voices,2),3)
+
+ def test_remove_tag_only_affects_selected_passage_and_requires_known_peer(self):
+  self.analyze();self.call('assign',speaker_id='0',name='Alice',remember=False)
+  key=hashlib.sha256(b'one').hexdigest()
+  with sqlite3.connect(Path(self.root)/'voices.sqlite') as db:
+   value=json.loads(db.execute('select data from meetings where id=?',(key,)).fetchone()[0])
+   value['speakers'].append(dict(value['speakers'][0],id='1',status='unknown',profile_id=None))
+   value['segments'] += [dict(t,speaker='1') for t in value['segments']]
+   db.execute('update meetings set data=? where id=?',(json.dumps(value),key))
+  removed=self.call('remove_tag',speaker_id=json.dumps({'id':'1','start':0,'end':12}))
+  self.assertEqual(removed['speaker_tag_exclusions'],[{'speaker':'1','start':0,'end':12}])
+  self.assertEqual(removed['segments'],value['segments'])
+  self.assertEqual(len(removed['speakers']),2)
+  self.assertEqual(self.call('get')['speaker_tag_exclusions'],removed['speaker_tag_exclusions'])
+  with self.assertRaisesRegex(ValueError,'Only unidentified'):
+   self.call('remove_tag',speaker_id=json.dumps({'id':'0','start':20,'end':30}))
+  with self.assertRaisesRegex(ValueError,'Only unidentified'):
+   self.call('remove_tag',speaker_id=json.dumps({'id':'1','start':0,'end':12}))
+
+ def test_live_passage_label_survives_first_and_forced_detection(self):
+  self.call('assign',speaker_id='__span__:2:4',name='Ian',remember=False)
+  for force in (False,True):
+   result={'model':worker.MODEL_ID,'segments':[{'start':0.,'end':12.,'speaker':'0'}],'speakers':[{'id':'0','name':'Unknown','embedding':None,'mixed':False,'clean_seconds':12,'sample_path':None,'profile_id':None,'status':'unknown'}]}
+   with patch.object(worker,'analyze',return_value=result):saved=self.call('analyze',force=force)
+   named=next(s for s in saved['speakers'] if s['name']=='Ian')
+   self.assertIn({'start':2.,'end':4.,'speaker':named['id']},saved['segments'])
+   self.assertIn({'start':0.,'end':2.,'speaker':'0'},saved['segments'])
+   self.assertIn({'start':4.,'end':12.,'speaker':'0'},saved['segments'])
+   self.assertEqual(self.samples(),0)

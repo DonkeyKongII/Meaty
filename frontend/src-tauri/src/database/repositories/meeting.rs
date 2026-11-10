@@ -182,7 +182,7 @@ impl MeetingsRepository {
         let now = Utc::now().naive_utc();
 
         let rows_affected =
-            sqlx::query("UPDATE meetings SET title = ?, updated_at = ? WHERE id = ?")
+            sqlx::query("UPDATE meetings SET title = ?, updated_at = ?, title_source = 'manual' WHERE id = ?")
                 .bind(new_title)
                 .bind(now)
                 .bind(meeting_id)
@@ -206,7 +206,7 @@ impl MeetingsRepository {
 
         // Update meetings table
         let meeting_update =
-            sqlx::query("UPDATE meetings SET title = ?, updated_at = ? WHERE id = ?")
+            sqlx::query("UPDATE meetings SET title = ?, updated_at = ?, title_source = 'ai' WHERE id = ? AND title_source NOT IN ('manual','calendar','meet') AND (title_source = 'ai' OR title = '' OR title GLOB 'Meeting [0-9]*' OR title GLOB 'Meeting_[0-9]*' OR title IN ('+ New Call','Untitled','Untitled Meeting'))")
                 .bind(new_title)
                 .bind(now)
                 .bind(meeting_id)
@@ -271,4 +271,30 @@ async fn delete_meeting_with_transaction(
         .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+#[cfg(test)]
+mod title_precedence_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn generated_titles_preserve_calendar_and_manual_names() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY,title TEXT,updated_at TEXT,title_source TEXT)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE transcript_chunks(meeting_id TEXT,meeting_name TEXT)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO meetings VALUES('m','Meeting 03_11_26',NULL,'legacy')")
+            .execute(&pool).await.unwrap();
+        assert!(MeetingsRepository::update_meeting_name(&pool,"m","AI heading").await.unwrap());
+        sqlx::query("UPDATE meetings SET title='Calendar sync',title_source='calendar'")
+            .execute(&pool).await.unwrap();
+        assert!(!MeetingsRepository::update_meeting_name(&pool,"m","Replacement heading").await.unwrap());
+        assert!(MeetingsRepository::update_meeting_title(&pool,"m","My chosen name").await.unwrap());
+        assert!(!MeetingsRepository::update_meeting_name(&pool,"m","Another heading").await.unwrap());
+        let saved: (String,String) = sqlx::query_as("SELECT title,title_source FROM meetings WHERE id='m'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(saved,("My chosen name".into(),"manual".into()));
+    }
 }

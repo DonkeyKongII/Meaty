@@ -1,5 +1,7 @@
 "use client";
 
+import { invoke } from '@tauri-apps/api/core';
+import { Pipeline } from './MeetingPipelineStatus';
 import { MeetingSummary, Summary, Transcript } from '@/types';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
@@ -85,6 +87,16 @@ export function SummaryPanel({
   isModelConfigLoading = false,
   onOpenModelSettings,
 }: SummaryPanelProps) {
+  const [cleanupStatus,setCleanupStatus]=useState<string|undefined>();
+  useEffect(()=>{
+    let active=true;
+    setCleanupStatus(undefined);
+    void invoke<Pipeline>('meeting_pipeline_status',{meetingId:meeting.id}).then(v=>{if(active)setCleanupStatus(v.cleanup);}).catch(()=>{});
+    const update=(event:Event)=>{const detail=(event as CustomEvent<{meetingId:string;pipeline:Pipeline}>).detail;if(detail.meetingId===meeting.id)setCleanupStatus(detail.pipeline.cleanup);};
+    window.addEventListener('meeting-pipeline-updated',update);
+    return()=>{active=false;window.removeEventListener('meeting-pipeline-updated',update);};
+  },[meeting.id]);
+  const awaitingCleanup=cleanupStatus==='queued'||cleanupStatus==='running';
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
@@ -284,7 +296,7 @@ export function SummaryPanel({
         <div className="flex items-center justify-center flex-1">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-            <p className="text-gray-600">Generating AI Summary...</p>
+            <p className="text-gray-600">{awaitingCleanup?'Waiting for transcript cleanup…':cleanupStatus==='failed'?'Transcript cleanup needs attention.':'Preparing meeting context and generating summary…'}</p>
           </div>
         </div>
       ) : !hasSummary ? (

@@ -334,6 +334,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     app: AppHandle<R>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
+    let _batch_guard = super::cleanup::before_recording().await;
+
     info!(
         "Starting recording with default devices, meeting: {:?}",
         meeting_name
@@ -505,6 +507,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     }
 
     crate::meeting_autostart::begin_sampling();
+    crate::live_meeting::begin(&app);
     // Emit success event
     app.emit("recording-started", serde_json::json!({
         "message": "Recording started successfully with parallel processing",
@@ -536,6 +539,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     system_device_name: Option<String>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
+    let _batch_guard = super::cleanup::before_recording().await;
+
     info!(
         "Starting recording with specific devices: mic={:?}, system={:?}, meeting={:?}",
         mic_device_name, system_device_name, meeting_name
@@ -704,6 +709,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     }
 
     crate::meeting_autostart::begin_sampling();
+    crate::live_meeting::begin(&app);
     // Emit success event
     app.emit("recording-started", serde_json::json!({
         "message": "Recording started with custom devices and parallel processing",

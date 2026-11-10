@@ -57,7 +57,8 @@ async function deliver(message, tabId) {
         // No reliable participant count: still forward a bare heartbeat. The
         // app treats 60s of silence as a dead tab and would stop the
         // recording of a meeting that is very much alive.
-        message = {event:'participants', provider:message.provider, session:message.session};
+        message = {...message, event:'participants'};
+        delete message.participant_count;
       }
     }
   }

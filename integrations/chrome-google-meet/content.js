@@ -34,6 +34,25 @@
     }
     return null;
   }
+  let lastRosterAt = 0;
+  let metadata = {};
+  const ROSTER_MS = 5 * 60 * 1000;
+  function meetingMetadata() {
+    // Read explicit Meet participant identities, including offscreen roster rows.
+    // Do not turn arbitrary tile text, captions, or chat messages into people.
+    const people = new Map();
+    for (const el of document.querySelectorAll('[data-participant-id], [data-requested-participant-id]')) {
+      const nameNode = el.querySelector?.('[data-self-name], [data-participant-name], [data-hovercard-id]');
+      const name = (el.getAttribute('data-participant-name') || el.getAttribute('data-self-name') || nameNode?.getAttribute('data-self-name') || nameNode?.getAttribute('data-participant-name') || nameNode?.textContent || '').trim().replace(/\s*\(You\)\s*$/i, '').slice(0, 100);
+      if (!name || /^(you|presentation|screen share)$/i.test(name)) continue;
+      people.set(name.toLocaleLowerCase(), {name, attendance:'confirmed'});
+      if (people.size >= 100) break;
+    }
+    const titleNode = document.querySelector?.('[data-meeting-title]');
+    const rawTitle = titleNode?.getAttribute('data-meeting-title') || titleNode?.textContent || document.title || '';
+    const title = rawTitle.replace(/^Meet\s*[-–—]\s*/i, '').replace(/\s*[-–—]\s*Google Meet$/i, '').trim();
+    return {participants:[...people.values()], meet_title: /^(Google Meet|Meet|[a-z]{3}-[a-z]{4}-[a-z]{3})$/i.test(title)?'':title.slice(0,500), meet_url:`https://meet.google.com/${location.pathname.match(/[a-z]{3}-[a-z]{4}-[a-z]{3}/)?.[0]||''}`};
+  }
   async function check() {
     if (running) return;
     if (!joined()) {
@@ -45,6 +64,8 @@
           // Force a fresh "joined" on rejoin so the app can cancel the stop
           // grace — send-on-change must never suppress it.
           lastSignature = null;
+          lastRosterAt = 0;
+          metadata = {};
           if (result?.accepted && Date.now() - absentSince > 5000) {
             session = null;
             sessionStorage.removeItem(storageKey);
@@ -59,12 +80,25 @@
       session = crypto.randomUUID();
       sessionStorage.setItem(storageKey, session);
     }
-    const count = participantCount();
-    const signature = `${session}:${count}`;
-    if (signature === lastSignature && Date.now() - lastSentAt < HEARTBEAT_MS) return;
     running = true;
     try {
-      await chrome.runtime.sendMessage({event:'joined', provider:'google-meet', session, participant_count:count});
+    const count = participantCount();
+    if (!lastRosterAt || Date.now() - lastRosterAt >= (metadata.participants?.length&&(!count||metadata.participants.length>=count)?ROSTER_MS:15000)) {
+      // Meet only mounts the full roster when People is open. Briefly open it
+      // for the snapshot, restoring the user's previous panel afterwards.
+      const peopleButton = [...document.querySelectorAll('button, [role="button"]')].find(el =>
+        el.getClientRects().length && typeof el.click === 'function' &&
+        /^(show everyone|people|participants)(?:\b|$)/i.test(el.getAttribute('aria-label') || '') &&
+        el.getAttribute('aria-expanded') === 'false');
+      if (peopleButton) {peopleButton.click();await new Promise(resolve=>setTimeout(resolve,750));}
+      metadata = meetingMetadata();
+      if (peopleButton?.getAttribute('aria-expanded') === 'true') peopleButton.click();
+      lastRosterAt = Date.now();
+    }
+    const signature = `${session}:${count}`;
+    if (signature === lastSignature && Date.now() - lastSentAt < HEARTBEAT_MS) return;
+      const result = await chrome.runtime.sendMessage({event:'joined', provider:'google-meet', session, participant_count:count, ...metadata});
+      if (!result?.accepted) return;
       lastSignature = signature;
       lastSentAt = Date.now();
     }

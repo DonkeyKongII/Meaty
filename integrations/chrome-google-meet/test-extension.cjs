@@ -4,19 +4,19 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const code = fs.readFileSync(path.join(__dirname, 'content.js'), 'utf8');
-function fixture({label = 'Join now', visible = true, icon = '', count = null, labelledCount = false, pathname = '/abc-defg-hij', stored = new Map()} = {}) {
+function fixture({names = [], title = '', label = 'Join now', visible = true, icon = '', count = null, labelledCount = false, pathname = '/abc-defg-hij', stored = new Map()} = {}) {
   let tick, now = 10000;
   const sent = [];
   const button = {getClientRects: () => visible ? [1] : [], getAttribute: name => name === 'aria-label' ? label : '', querySelectorAll: () => [{textContent:icon}]};
   vm.runInNewContext(code, {
-    location:{pathname}, document:{getElementById:id=>id==='people-label'?{textContent:'People'}:null,querySelectorAll:selector => selector.includes('data-participant-count') ? (count===null?[]:[{getClientRects:()=>[1],getAttribute:name=>name===(labelledCount?'aria-labelledby':'data-participant-count')?(labelledCount?'people-label':String(count)):'',textContent:labelledCount?'People'+count:''}]) : [button]}, getComputedStyle:() => ({visibility:'visible'}),
+    location:{pathname}, document:{title, querySelector:()=>null,getElementById:id=>id==='people-label'?{textContent:'People'}:null,querySelectorAll:selector => selector==='[data-participant-id], [data-requested-participant-id]'?names.map(name=>({getAttribute:key=>key==='data-participant-name'?name:'',querySelector:()=>null})):selector.includes('data-participant-count') ? (count===null?[]:[{getClientRects:()=>[1],getAttribute:name=>name===(labelledCount?'aria-labelledby':'data-participant-count')?(labelledCount?'people-label':String(count)):'',textContent:labelledCount?'People'+count:''}]) : [button]}, getComputedStyle:() => ({visibility:'visible'}),
     chrome:{runtime:{sendMessage: async message => {sent.push(message); return {accepted:true};}}},
     sessionStorage:{getItem:key => stored.get(key) || null,setItem:(key,value)=>stored.set(key,value),removeItem:key=>stored.delete(key)},
     crypto:{randomUUID:() => `session-${now}`}, Date:{now:() => now}, console,
     window:{addEventListener:() => {}},
     setInterval:fn => {tick=fn;},
   });
-  return {sent, stored, async tick(ms=2000) {now+=ms;tick();await new Promise(resolve => setImmediate(resolve));}, setLabel(value){label=value;}};
+  return {sent, stored, async tick(ms=2000) {now+=ms;tick();await new Promise(resolve => setImmediate(resolve));}, setLabel(value){label=value;}, setNames(value){names=value;}};
 }
 test('prejoin preview does not trigger recording', async () => {
   const f=fixture();await f.tick();assert.equal(f.sent.length,0);
@@ -72,8 +72,8 @@ function worker({enabled=true, fail=false}={}) {
     chrome:{runtime:{onMessage:{addListener:fn=>listener=fn},connectNative:()=>port},
       storage:{local:storage(local),session:storage(session)},tabs:{onRemoved:{addListener:fn=>removed=fn},onUpdated:{addListener:fn=>updated=fn}}},
   });
-  return {messages, close: id=>removed(id), navigate: (id,url)=>updated(id,{url}), get calls(){return messages.length;},setFail(value){fail=value;},send(sender={tab:{id:1},url:'https://meet.google.com/abc-defg-hij'},event='joined',count=null) {
-    return new Promise(resolve=>{const result=listener({event,provider:'google-meet',session:'same-call',participant_count:count},sender,resolve);if(!result)resolve(undefined);});
+  return {messages, close: id=>removed(id), navigate: (id,url)=>updated(id,{url}), get calls(){return messages.length;},setFail(value){fail=value;},send(sender={tab:{id:1},url:'https://meet.google.com/abc-defg-hij'},event='joined',count=null,metadata={}) {
+    return new Promise(resolve=>{const result=listener({event,provider:'google-meet',session:'same-call',participant_count:count,...metadata},sender,resolve);if(!result)resolve(undefined);});
   }};
 }
 test('repeat joins become heartbeats on the same native session',async()=>{
@@ -140,3 +140,14 @@ test('missing participant count still forwards a bare heartbeat',async()=>{
 });
 
 test('Google Meet People badge uses aria-labelledby and concatenated text',async()=>{const f=fixture({label:'Leave call',count:7,labelledCount:true});await f.tick();assert.equal(f.sent.at(-1).participant_count,7);});
+
+test('names and meeting title sent at join and refreshed after five minutes',async()=>{
+ const f=fixture({label:'Leave call',names:['Ian','Will','Vijay'],title:'Meet - Weekly planning'});
+ await f.tick();assert.deepEqual(Array.from(f.sent[0].participants,p=>p.name),['Ian','Will','Vijay']);assert.equal(f.sent[0].meet_title,'Weekly planning');
+ f.setNames(['Ian','Vijay','Madhvendra']);await f.tick(16000);assert.equal(f.sent.at(-1).participants[1].name,'Will');
+ await f.tick(300000);assert.deepEqual(Array.from(f.sent.at(-1).participants,p=>p.name),['Ian','Vijay','Madhvendra']);
+});
+test('bare heartbeats retain names and title when no count is available',async()=>{
+ const w=worker();await w.send();await w.send(undefined,'joined',null,{participants:[{name:'Ian'}],meet_title:'Planning'});
+ assert.equal(w.messages.at(-1).meet_title,'Planning');assert.equal(w.messages.at(-1).participants[0].name,'Ian');assert.equal(w.messages.at(-1).participant_count,undefined);
+});

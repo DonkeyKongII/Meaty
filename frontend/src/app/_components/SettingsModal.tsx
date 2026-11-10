@@ -1,3 +1,4 @@
+import { CompanySettings } from '@/components/CompanySettings';
 import { ModelConfig } from "@/components/ModelSettingsModal";
 import { PreferenceSettings } from "@/components/PreferenceSettings";
 import { DeviceSelection } from "@/components/DeviceSelection";
@@ -81,6 +82,7 @@ export function SettingsModals({
           <div className="flex-1 overflow-y-auto p-6 space-y-8">
             {/* General Preferences Section */}
             <PreferenceSettings />
+              <CompanySettings />
 
             {/* Divider */}
             <div className="border-t pt-8">

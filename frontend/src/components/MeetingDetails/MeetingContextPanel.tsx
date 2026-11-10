@@ -1,78 +1,82 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+import {useEffect,useRef,useState} from 'react';
+import {invoke} from '@tauri-apps/api/core';
+import {Pencil} from 'lucide-react';
+import {useSidebar} from '@/components/Sidebar/SidebarProvider';
 
-type Context = { manual_companies?:string[]; classification: string; companies: {domain:string;name:string}[]; participants: {name:string;email:string;attendance:string}[]; status:string; calendar_title?:string; notes?:string; identity_suggestions?:{name:string;start?:number;reason:string}[] };
-export function MeetingContextPanel({meetingId}: {meetingId:string}) {
-  const [data,setData] = useState<Context|null>(null);
-  const [editing,setEditing] = useState(false);
-  const [company,setCompany] = useState('');
-  const [people,setPeople] = useState('');
-  const [domains,setDomains] = useState('');
-  const [aliases,setAliases] = useState('');
-  const [error,setError] = useState('');
-  const [busy,setBusy] = useState(false);
-  const {refetchMeetings} = useSidebar();
-  const call = (request:object) => invoke<any>('meeting_context_action',{request});
-  useEffect(()=>{
-    let active=true;
-    let timer:NodeJS.Timeout|null=null;
-    const load=()=>call({action:'get',meeting_id:meetingId}).then(value=>{if(active)setData(value);}).catch(e=>{if(active)setError(String(e));});
-    setData(null); setEditing(false); setError('');
-    const startPolling=()=>{
-      if(timer)clearInterval(timer);
-      void load();
-      timer=setInterval(load,15000);
-    };
-    const stopPolling=()=>{if(timer){clearInterval(timer);timer=null;}};
-    const onVisibilityChange=()=>{if(document.visibilityState==='visible'){startPolling();}else{stopPolling();}};
-    if(document.visibilityState==='visible'){startPolling();}
-    document.addEventListener('visibilitychange',onVisibilityChange);
-    return()=>{active=false;stopPolling();document.removeEventListener('visibilitychange',onVisibilityChange);};
-  },[meetingId]);
-  async function edit() {
-    try {
-      const settings=await call({action:'settings'});
-      setDomains(settings.internal_domains.join(', '));
-      setAliases(Object.entries(settings.company_names).map(([d,n])=>`${d} = ${n}`).join('\n'));
-      setCompany(data?.manual_companies?.join('\n')||'');
-      setPeople(data?.participants.map(p=>`${p.name} <${p.email}>${p.attendance==='confirmed'?' confirmed':''}`).join('\n')??'');
-      setEditing(true);
-    } catch(e){setError(String(e));}
-  }
-  async function save() {
-    setBusy(true);setError('');
-    try {
-      const company_names=Object.fromEntries(aliases.split('\n').filter(l=>l.trim()).map(l=>{const i=l.indexOf('=');if(i<1)throw Error('Use domain = Company Name');return [l.slice(0,i).trim().toLowerCase(),l.slice(i+1).trim()];}));
-      const participants=people.split('\n').filter(l=>l.trim()).map(l=>{
-        const match=l.trim().match(/^(.*?)\s*<([^>]*)>\s*(confirmed)?$/);
-        if(!match)throw Error('Use Name <email@example.com> on each line. Add confirmed only for known attendees.');
-        return {name:match[1],email:match[2],attendance:match[3]?'confirmed':'invited'};
-      });
-      await call({action:'settings',data:{internal_domains:domains.split(',').map(d=>d.trim()).filter(Boolean),company_names}});
-      setData(await call({action:'save',meeting_id:meetingId,data:{...data,participants,manual_companies:company.split('\n').map(v=>v.trim()).filter(Boolean)}}));
-      setEditing(false);await refetchMeetings();
-    }catch(e){setError(String(e));}finally{setBusy(false);}
-  }
-  async function queue(){setBusy(true);try{setData(await call({action:'queue',meeting_id:meetingId}));}catch(e){setError(String(e));}finally{setBusy(false);}}
-  return <div className="border-b p-3 text-sm space-y-2">
-    <div className="flex items-center gap-3"><strong>People & companies</strong><span>{data?.classification==='internal'?'Internal':data?.companies?.map(c=>c.name).join(', ')||'Unclassified'}</span><button className="meaty-action text-blue-600 ml-auto" onClick={edit}>Edit</button></div>
-    {data?.calendar_title&&<div>{data.calendar_title}</div>}
-    <div className="text-gray-600">{data?.participants?.length||0} expected participants · {data?.participants?.filter(p=>p.attendance==='confirmed').length||0} confirmed attendees</div>
-    <details className="text-xs"><summary className="cursor-pointer text-gray-600">Participants & evidence{data?.identity_suggestions?.length ? ` · ${data.identity_suggestions.length} identity suggestions` : ''}</summary><div className="space-y-2 max-h-48 overflow-y-auto mt-2">
-    {!!data?.participants?.length&&<div>{data.participants.map(p=>`${p.name||p.email}${p.attendance==='confirmed'?' (confirmed)':''}`).join(', ')}</div>}
-    {!!data?.identity_suggestions?.length&&<div className="text-xs"><strong>Suggested identities — review in Speakers</strong>{data.identity_suggestions.map((s,i)=><p key={i}>{s.name}{s.start!=null?` at ${Math.floor(s.start/60)}:${String(Math.floor(s.start%60)).padStart(2,'0')}`:''}: {s.reason}</p>)}</div>}
-    {data?.notes&&<p className="text-xs text-gray-500">{data.notes}</p>}
-    </div></details>
-    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500"><span>Calendar enrichment: {data?.status?.replaceAll('_',' ')||'loading'}</span><button disabled={busy} onClick={queue} className="meaty-action text-blue-600">Retry calendar lookup</button></div>
-    {editing&&<div className="space-y-2 max-h-64 overflow-y-auto">
-      <label className="block">Company for this meeting<textarea aria-label="Company for this meeting" className="border rounded w-full p-2" rows={2} value={company} onChange={e=>setCompany(e.target.value)} placeholder="Company name, or Internal"/><span className="text-xs text-gray-500">One company per line. Enter Internal for an internal meeting. Leave blank to use email domains automatically.</span></label>
-      <label className="block">Participants — one Name &lt;email&gt; per line; add “confirmed” for known attendees<textarea className="border rounded w-full p-2" rows={5} value={people} onChange={e=>setPeople(e.target.value)}/></label>
-      <label className="block">Internal email domains<input className="border rounded w-full p-2" value={domains} onChange={e=>setDomains(e.target.value)}/></label>
-      <label className="block">Company names — domain = Company Name<textarea className="border rounded w-full p-2" rows={3} value={aliases} onChange={e=>setAliases(e.target.value)}/></label>
-      <button disabled={busy} className="meaty-action text-blue-600 mr-3" onClick={save}>Save</button><button className="meaty-action" onClick={()=>setEditing(false)}>Cancel</button>
-    </div>}
-    {error&&<p role="alert" className="text-red-600">{error}</p>}
-  </div>;
+type Recommendation={value:string;reason:string;state:'pending'|'accepted'|'dismissed'};
+type Context={meet_context_ready?:boolean;queue_delayed?:boolean;meet_title?:string;participants?:{name:string}[];recommendations?:Partial<Record<'title'|'customer',Recommendation>>;meeting_title?:string;calendar_title?:string;status:string;notes?:string;classification?:string;manual_companies?:string[];companies?:{name:string}[]};
+export function MeetingContextPanel({meetingId,onTitleChange}:{meetingId:string;onTitleChange?:(title:string)=>void}){
+ const [data,setData]=useState<Context|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [assignment,setAssignment]=useState('automatic'),[customers,setCustomers]=useState(''),[saving,setSaving]=useState(false),[editing,setEditing]=useState(false);
+ const [reviewBusy,setReviewBusy]=useState(false),[suggestionEdit,setSuggestionEdit]=useState<'title'|'customer'|null>(null),[suggestionDraft,setSuggestionDraft]=useState('');
+ const dirty=useRef(false);
+ const {refetchMeetings}=useSidebar();
+ useEffect(()=>{if(!data||dirty.current)return;const manual=data.manual_companies||[];setAssignment(manual.length?(manual.length===1&&manual[0].toLowerCase()==='internal'?'internal':'customer'):'automatic');setCustomers(manual.filter(n=>n.toLowerCase()!=='internal').join('\n'));},[data]);
+ const previous=useRef('');
+ const titleCallback=useRef(onTitleChange);titleCallback.current=onTitleChange;
+ const lastTitle=useRef('');
+ useEffect(()=>{
+  let active=true;
+  const load=()=>invoke<Context>('meeting_context_action',{request:{action:'get',meeting_id:meetingId}}).then(value=>{
+   if(!active)return;setData(value);
+   if(value.meeting_title&&lastTitle.current!==value.meeting_title){lastTitle.current=value.meeting_title;titleCallback.current?.(value.meeting_title);}
+   if(value.status!=='pending'&&previous.current==='pending')void refetchMeetings();
+   previous.current=value.status;
+  }).catch(e=>{if(active)setError(String(e));});
+  setData(null);previous.current='';void load();const timer=setInterval(load,5000);
+  return()=>{active=false;clearInterval(timer);};
+ },[meetingId,refetchMeetings]);
+ async function queue(){setBusy(true);setError('');try{setData(await invoke<Context>('meeting_context_action',{request:{action:'queue',meeting_id:meetingId}}));previous.current='pending';}catch(e){setError(String(e));}finally{setBusy(false);}}
+ async function saveAssignment(){
+  const names=customers.split('\n').map(n=>n.trim()).filter(Boolean);
+  if(assignment==='customer'&&!names.length){setError('Enter a customer name.');return;}
+  setSaving(true);setError('');
+  try{const value=await invoke<Context>('meeting_context_action',{request:{action:'classify',meeting_id:meetingId,manual_companies:assignment==='internal'?['Internal']:assignment==='customer'?names:[]}});dirty.current=false;setData(value);setEditing(false);await refetchMeetings();}
+  catch(e){setError(String(e));}finally{setSaving(false);}
+ }
+ const suggestions=(['title','customer'] as const).filter(field=>{
+  const item=data?.recommendations?.[field];if(!item||item.state!=='pending')return false;
+  const current=field==='title'?data?.meeting_title:data?.classification==='internal'?'Internal':data?.companies?.map(c=>c.name).join(', ');
+  return item.value!==current;
+ });
+ async function reviewSuggestions(fields:('title'|'customer')[],action:'accept'|'dismiss',editValue?:string){
+  setReviewBusy(true);setError('');
+  try{const decisions=Object.fromEntries(fields.map(field=>[field,{action,expected:data?.recommendations?.[field]?.value,...(editValue!==undefined?{value:editValue}:{})}]));
+   const value=await invoke<Context>('meeting_context_action',{request:{action:'review_recommendations',meeting_id:meetingId,decisions}});
+   setData(value);setSuggestionEdit(null);if(value.meeting_title){lastTitle.current=value.meeting_title;titleCallback.current?.(value.meeting_title);}await refetchMeetings();
+  }catch(e){setError(String(e));}finally{setReviewBusy(false);}
+ }
+ const pending=busy||(data?.status==='pending'&&!data?.queue_delayed&&!data?.meet_context_ready);
+ return <section className="border-b p-4 text-sm space-y-3">
+  <div className="space-y-3 border-b pb-4">
+   <div className="flex items-center justify-between gap-3">
+    <div className="min-w-0"><h2 className="meaty-panel-label">Customer / internal</h2><p className="mt-1 break-words font-semibold" aria-live="polite">{data?.classification==='internal'?'Internal':data?.companies?.map(c=>c.name).join(', ')||'Unassigned'}</p></div>
+    <button type="button" aria-label="Edit meeting assignment" aria-expanded={editing} aria-controls="customer-assignment-editor" disabled={!data||saving} className="meaty-assignment-edit shrink-0" onClick={()=>setEditing(true)}><Pencil className="h-4 w-4" aria-hidden="true"/></button>
+   </div>
+   {editing&&<fieldset id="customer-assignment-editor" disabled={!data||saving} className="meaty-assignment-editor space-y-3 disabled:opacity-60">
+    <label className="block font-semibold">Assign meeting to<select aria-label="Assign meeting to" value={assignment} onChange={e=>{dirty.current=true;setAssignment(e.target.value);}} className="mt-1 w-full border p-2"><option value="automatic">Automatic</option><option value="internal">Internal</option><option value="customer">Customer</option></select></label>
+    {assignment==='customer'&&<label className="block font-semibold">Customer name<textarea aria-label="Customer name" rows={2} value={customers} onChange={e=>{dirty.current=true;setCustomers(e.target.value);}} className="mt-1 w-full border p-2" placeholder="Customer name"/></label>}
+    <div className="flex flex-wrap gap-3"><button type="button" disabled={!dirty.current} onClick={saveAssignment} className="meaty-action meaty-yellow-action">{saving?'Saving…':'Save assignment'}</button><button type="button" className="meaty-action" onClick={()=>{dirty.current=false;const manual=data?.manual_companies||[];setAssignment(manual.length?(manual.length===1&&manual[0].toLowerCase()==='internal'?'internal':'customer'):'automatic');setCustomers(manual.filter(n=>n.toLowerCase()!=='internal').join('\n'));setEditing(false);setError('');}}>Cancel</button></div>
+   </fieldset>}
+  </div>
+  {!!suggestions.length&&<section className="meaty-calendar-suggestions space-y-3" aria-label="Calendar suggestions" aria-busy={reviewBusy}>
+   <h2 className="meaty-panel-label">Suggested from calendar</h2>
+   {suggestions.map(field=>{const item=data!.recommendations![field]!;return <div key={field} className="meaty-suggestion-row space-y-2">
+    <div className="text-xs">{field==='title'?'Meeting title':'Customer'}</div><p className="font-semibold break-words">{item.value}</p><p className="text-xs text-gray-600">{item.reason}</p>
+    {suggestionEdit===field?<div className="space-y-2"><label className="block">{field==='title'?'Edit suggested title':'Edit suggested customer'}<input aria-label={field==='title'?'Edit suggested title':'Edit suggested customer'} maxLength={field==='title'?500:200} className="mt-1 w-full border p-2" value={suggestionDraft} disabled={reviewBusy} onChange={e=>setSuggestionDraft(e.target.value)}/></label><div className="flex flex-wrap gap-2"><button type="button" className="meaty-suggestion-small" disabled={reviewBusy||!suggestionDraft.trim()} onClick={()=>void reviewSuggestions([field],'accept',suggestionDraft)}>Save & accept</button><button type="button" className="meaty-suggestion-small" disabled={reviewBusy} onClick={()=>setSuggestionEdit(null)}>Cancel</button></div></div>:<div className="flex flex-wrap gap-2"><button type="button" className="meaty-suggestion-small meaty-suggestion-accept" aria-label={`Accept suggested ${field}`} disabled={reviewBusy} onClick={()=>void reviewSuggestions([field],'accept')}>Accept</button><button type="button" className="meaty-suggestion-small" aria-label={`Edit suggested ${field}`} disabled={reviewBusy} onClick={()=>{setSuggestionEdit(field);setSuggestionDraft(item.value);}}>Edit</button><button type="button" className="meaty-suggestion-small" aria-label={`Dismiss suggested ${field}`} disabled={reviewBusy} onClick={()=>void reviewSuggestions([field],'dismiss')}>Dismiss</button></div>}
+   </div>;})}
+   {suggestions.length===2&&<div className="flex flex-wrap gap-3"><button type="button" className="meaty-action meaty-yellow-action" disabled={reviewBusy||suggestionEdit!==null} onClick={()=>void reviewSuggestions(['title','customer'],'accept')}>Accept both</button><button type="button" className="meaty-action" disabled={reviewBusy||suggestionEdit!==null} onClick={()=>void reviewSuggestions(['title','customer'],'dismiss')}>Dismiss both</button></div>}
+   {reviewBusy&&<p role="status">Saving your choices…</p>}
+  </section>}
+  {data?.meet_title&&<p className="text-xs text-gray-500">From Google Meet · {data.meet_title}</p>}
+  {!!data?.participants?.length&&<p className="text-xs text-gray-500">Meeting people: {data.participants.map(p=>p.name).filter(Boolean).join(', ')}</p>}
+  {data?.calendar_title&&<p className="text-xs text-gray-500">From calendar · {data.calendar_title}</p>}
+  <button type="button" disabled={pending} onClick={queue} className="meaty-action meaty-yellow-action">{busy?'Queuing calendar lookup…':pending?'Calendar lookup queued':'Check calendar'}</button>
+  {pending&&<p role="status" aria-live="polite" className="flex items-center gap-2"><span className="meaty-busy-indicator"/>Queued for the background calendar check. Checks run about every five minutes while this Mac, Codex and signed-in Chrome are available.</p>}
+  {data?.meet_context_ready&&data.status==='pending'&&<p className="text-xs text-gray-500">Meeting details received from Google Meet. Calendar enrichment continues in the background.</p>}
+  {data?.queue_delayed&&<p role="status" className="text-xs text-gray-600">Still waiting for the background calendar worker. You can keep using Meaty; any result will appear here. Google Meet names and title are available immediately when sent by the extension.</p>}
+  {data?.status==='needs_review'&&data.notes&&<details className="text-xs"><summary className="cursor-pointer">Calendar match details</summary><p className="mt-2">{data.notes}</p></details>}
+  {error&&<p role="alert" className="text-red-700">{error}</p>}
+ </section>;
 }

@@ -6,6 +6,7 @@ use std::{
     process::{Command, Stdio},
 };
 use tauri::{Manager, Emitter};
+static LIVE_LABEL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static WORKER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tauri::command]
@@ -23,7 +24,8 @@ pub async fn speaker_action(
     offset: Option<i64>,
     remember: Option<bool>,
 ) -> Result<Value, String> {
-    if !["get", "analyze", "enroll", "label", "rename", "forget", "search", "assign"].contains(&action.as_str()) {
+    let _live_guard=if meeting_id.starts_with("live-") {Some(LIVE_LABEL_LOCK.lock().await)} else {None};
+    if !["get", "analyze", "enroll", "label", "rename", "forget", "search", "assign", "remove_tag"].contains(&action.as_str()) {
         return Err("Unsupported speaker action".into());
     }
     if action == "analyze" && crate::is_recording().await {
@@ -157,7 +159,7 @@ pub async fn summary_text(root: &std::path::Path, pool: &sqlx::SqlitePool, meeti
     let data:Value=serde_json::from_str(&data).map_err(|e|e.to_string())?;
     let speakers=data["speakers"].as_array().ok_or("Invalid saved speaker analysis")?;
     let expected=data["requested_speakers"].as_i64().unwrap_or(-1);
-    let limit=if expected>0{expected as usize}else{20};
+    let limit=if expected>0 && data["count_is_estimate"]!=true{expected as usize}else{20};
     if speakers.iter().filter(|s|!s["id"].as_str().unwrap_or("").starts_with("manual-")).count()>limit || data["analysis_warning"].as_str().is_some(){return Ok(text.to_owned())}
     let profiles:Vec<(String,String)>=sqlx::query_as("SELECT id,name FROM profiles").fetch_all(&mut db).await.map_err(|e|e.to_string())?;
     let profiles:std::collections::HashMap<_,_>=profiles.into_iter().collect();
@@ -198,7 +200,7 @@ pub fn start_background(app: tauri::AppHandle) {
                 if let Ok(ids)=sqlx::query_scalar::<_,String>("SELECT id FROM meetings WHERE folder_path IS NOT NULL AND id NOT IN (SELECT meeting_id FROM speaker_jobs)").fetch_all(pool).await {
                     for id in ids {
                         let saved=speaker_action(app.clone(),app.state::<AppState>(),id.clone(),"get".into(),None,None,None,None,None,None,None,None).await;
-                        let complete=saved.as_ref().is_ok_and(|v|v["segments"].as_array().is_some_and(|s|!s.is_empty()) && v["analysis_warning"].is_null());
+                        let complete=saved.as_ref().is_ok_and(|v|v["segments"].as_array().is_some_and(|s|!s.is_empty()) && v["speakers"].as_array().is_some_and(|s|s.iter().any(|v|!v["id"].as_str().unwrap_or("").starts_with("manual-"))) && v["analysis_warning"].is_null());
                         let _=sqlx::query("INSERT OR IGNORE INTO speaker_jobs(meeting_id,status) VALUES(?,?)").bind(&id).bind(if complete {"complete"} else {"queued"}).execute(pool).await;
                     }
                 }
@@ -217,4 +219,18 @@ pub fn start_background(app: tauri::AppHandle) {
             let _=app.emit("speaker-analysis-updated", &id);
         }
     });
+}
+
+/// Copy labels made while recording to the final saved meeting before analysis starts.
+pub async fn carry_live<R:tauri::Runtime>(app:&tauri::AppHandle<R>,live_id:&str,meeting_id:&str)->Result<(),String> {
+    let _guard=LIVE_LABEL_LOCK.lock().await;
+    use sha2::{Digest,Sha256};
+    use sqlx::{Connection,sqlite::SqliteConnectOptions};
+    let path=app.path().app_data_dir().map_err(|e|e.to_string())?.join("speaker-recognition/voices.sqlite");
+    if !path.is_file(){return Ok(())}
+    let mut db=sqlx::SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(path)).await.map_err(|e|e.to_string())?;
+    let source=format!("{:x}",Sha256::digest(live_id.as_bytes()));
+    let target=format!("{:x}",Sha256::digest(meeting_id.as_bytes()));
+    sqlx::query("INSERT OR IGNORE INTO meetings(id,data) SELECT ?,data FROM meetings WHERE id=?").bind(target).bind(source).execute(&mut db).await.map_err(|e|e.to_string())?;
+    Ok(())
 }

@@ -85,6 +85,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [isMeetingActive, setIsMeetingActive] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const searchRequestRef = useRef(0);
   const [serverAddress, setServerAddress] = useState('');
   const [transcriptServerAddress, setTranscriptServerAddress] = useState('');
   const summaryPollsRef = React.useRef(new Map<string, SummaryPoll>());
@@ -277,25 +278,29 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, [isRecording, pathname, router]);
 
   // Function to search through meeting transcripts
-  const searchTranscripts = async (query: string) => {
-    if (!query.trim()) {
+  const searchTranscripts = React.useCallback(async (query: string) => {
+    const request = ++searchRequestRef.current;
+    const trimmed = query.trim();
+    if (!trimmed) {
       setSearchResults([]);
+      setIsSearching(false);
       return;
     }
-
+    setIsSearching(true);
     try {
-      setIsSearching(true);
-
-
-      const results = await invoke('api_search_transcripts', { query }) as TranscriptSearchResult[];
-      setSearchResults(results);
+      const results = await invoke<TranscriptSearchResult[]>('api_search_transcripts', { query: trimmed });
+      if (request === searchRequestRef.current) setSearchResults(results);
     } catch (error) {
-      console.error('Error searching transcripts:', error);
-      setSearchResults([]);
+      if (request === searchRequestRef.current) {
+        console.error('Error searching transcripts:', error);
+        setSearchResults([]);
+      }
     } finally {
-      setIsSearching(false);
+      if (request === searchRequestRef.current) setIsSearching(false);
     }
-  };
+  }, []);
+
+  useEffect(() => () => { searchRequestRef.current += 1; }, []);
 
   // Summary polling management
   const stopSummaryPolling = React.useCallback((meetingId: string, processId?: string) => {

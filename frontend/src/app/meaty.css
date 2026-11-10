@@ -86,3 +86,33 @@
 .meaty-ui .meaty-search:focus-within {outline:3px solid #90300f;outline-offset:2px;}
 .meaty-ui .meaty-search input {flex:1;min-width:0;width:0;height:100%;padding:0;border:0;background:transparent;border-radius:0;box-shadow:none;outline:none;font-size:13px;}
 .meaty-ui .meaty-search button {display:flex;align-items:center;justify-content:center;flex-shrink:0;width:24px;height:24px;padding:2px;border:0!important;background:transparent;box-shadow:none!important;}
+
+/* Meeting panel: details and transcript share the left pane. */
+.meaty-ui .meaty-meeting-tabs {display:flex;gap:8px;padding:16px 16px 0;border-bottom:2px solid var(--meaty-ink);background:var(--meaty-paper);flex-shrink:0;}
+.meaty-ui .meaty-meeting-tabs [role='tab'] {padding:10px 12px;border:0;border-bottom:4px solid transparent;background:transparent;font-weight:750;}
+.meaty-ui .meaty-meeting-tabs [aria-selected='true'] {background:var(--meaty-yellow);border-bottom-color:var(--meaty-ink);}
+.meaty-ui .meaty-transcript [hidden] {display:none!important;}
+.meaty-ui .meaty-yellow-action {background:var(--meaty-yellow);color:var(--meaty-ink);border:2px solid var(--meaty-ink);border-radius:2px;box-shadow:2px 2px 0 var(--meaty-ink);min-height:30px;padding:5px 12px;}
+.meaty-ui .meaty-yellow-action:hover {background:var(--meaty-orange);}
+.meaty-ui .meaty-speaker-stepper {display:flex;height:34px;border:2px solid var(--meaty-ink);border-radius:2px;box-shadow:3px 3px 0 var(--meaty-ink);background:var(--meaty-card);}
+.meaty-ui .meaty-speaker-stepper input {width:62px;min-width:0;border:0;border-radius:0;padding:0 8px;text-align:center;font:750 14px monospace;appearance:textfield;}
+.meaty-ui .meaty-speaker-stepper input::-webkit-inner-spin-button,.meaty-ui .meaty-speaker-stepper input::-webkit-outer-spin-button {-webkit-appearance:none;margin:0;}
+.meaty-ui .meaty-speaker-stepper>div {display:flex;flex-direction:column;width:32px;border-left:2px solid var(--meaty-ink);}
+.meaty-ui .meaty-speaker-stepper button {flex:1;display:flex;align-items:center;justify-content:center;padding:0;border:0!important;border-radius:0!important;box-shadow:none!important;background:var(--meaty-yellow);font-size:15px;line-height:1;}
+.meaty-ui .meaty-speaker-stepper button+button {border-top:2px solid var(--meaty-ink)!important;}
+.meaty-ui .meaty-speaker-stepper button:hover {background:var(--meaty-orange);}
+.meaty-ui .meaty-busy-indicator {display:inline-block;width:12px;height:12px;border:2px solid var(--meaty-ink);border-right-color:transparent;border-radius:50%;animation:meaty-spin 1s linear infinite;}
+@keyframes meaty-spin {to {transform:rotate(360deg);}}
+@media(prefers-reduced-motion:reduce){.meaty-ui .meaty-busy-indicator{animation:none;}}
+@media(pointer:coarse){.meaty-ui .meaty-speaker-stepper>div{flex-direction:row;width:88px}.meaty-ui .meaty-speaker-stepper button{min-width:44px}.meaty-ui .meaty-speaker-stepper button+button{border-top:0!important;border-left:2px solid var(--meaty-ink)!important}}
+.meaty-ui .meaty-speaker-stepper {width:max-content;}
+.meaty-ui button.meaty-yellow-action {min-height:30px!important;padding:5px 12px!important;font-size:inherit;line-height:1.4;}
+
+.meaty-ui button.meaty-assignment-edit {display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:6px;background:var(--meaty-yellow);border:2px solid var(--meaty-ink);border-radius:2px;box-shadow:2px 2px 0 var(--meaty-ink);}
+.meaty-ui button.meaty-assignment-edit:hover {background:var(--meaty-orange);}
+.meaty-ui .meaty-assignment-editor {border:2px solid var(--meaty-ink);padding:12px;background:var(--meaty-paper);box-shadow:3px 3px 0 var(--meaty-ink);}
+
+.meaty-ui .meaty-calendar-suggestions {border:2px solid var(--meaty-ink);padding:12px;background:var(--meaty-card);box-shadow:3px 3px 0 var(--meaty-ink);}
+.meaty-ui .meaty-suggestion-row {border-bottom:1px solid var(--meaty-ink);padding-bottom:12px;}
+.meaty-ui button.meaty-suggestion-small {font-size:12px;padding:3px 8px;min-height:26px;line-height:1.4;box-shadow:1px 1px 0 var(--meaty-ink);}
+.meaty-ui button.meaty-suggestion-accept {background:var(--meaty-yellow);}

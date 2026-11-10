@@ -103,7 +103,7 @@ pub async fn start_retranscription<R: Runtime>(
     RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
 
     let use_parakeet = provider.as_deref() == Some("parakeet");
-    let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider).await;
+    let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider, false).await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
     super::common::unload_engine_after_batch(use_parakeet).await;
@@ -137,9 +137,32 @@ pub async fn start_retranscription<R: Runtime>(
     result
 }
 
+pub(crate) async fn snapshot(pool: &sqlx::SqlitePool, id: &str) -> Result<Vec<(String,String,Option<f64>,Option<f64>)>> {
+    Ok(sqlx::query_as("SELECT id,transcript,audio_start_time,audio_end_time FROM transcripts WHERE meeting_id=? ORDER BY id")
+        .bind(id).fetch_all(pool).await?)
+}
+
+/// Re-read the complete recording with batch pause detection and silence-aware
+/// context windows, independently of what the live speech detector delivered.
+pub(crate) async fn cleanup_recording<R: Runtime>(app: AppHandle<R>, id: String, folder: String,
+    language: Option<String>, model: String, provider: String) -> Result<RetranscriptionResult> {
+    let _guard = RetranscriptionGuard::acquire().map_err(|e| anyhow!(e))?;
+    RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
+    let parakeet = provider == "parakeet";
+    if !parakeet && provider != "localWhisper" {
+        return Err(anyhow!("Automatic cleanup requires a local Parakeet or Whisper transcription model"));
+    }
+    let result = run_retranscription(app.clone(),id.clone(),folder,language,Some(model),Some(provider),true).await;
+    super::common::unload_engine_after_batch(parakeet).await;
+    if result.is_ok() {
+        let _ = app.emit("retranscription-complete", serde_json::json!({"meeting_id":id,"automatic":true}));
+    }
+    result
+}
+
 /// Find audio file in meeting folder
 /// Tries common names first, then scans for any file with an audio extension
-fn find_audio_file(folder: &Path) -> Result<PathBuf> {
+pub(crate) fn find_audio_file(folder: &Path) -> Result<PathBuf> {
     let candidates = [
         "audio.mp4", "audio.m4a", "audio.wav", "audio.mp3",
         "audio.flac", "audio.ogg", "recording.mp4",
@@ -177,8 +200,14 @@ async fn run_retranscription<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    automatic: bool,
 ) -> Result<RetranscriptionResult> {
     let folder_path = PathBuf::from(&meeting_folder_path);
+    let pool = app.state::<AppState>().db_manager.pool().clone();
+    let original = snapshot(&pool, &meeting_id).await?;
+    if automatic && !folder_path.join("transcripts.live.json").exists() {
+        std::fs::write(folder_path.join("transcripts.live.json"), serde_json::to_vec_pretty(&original)?)?;
+    }
     let audio_path = find_audio_file(&folder_path)?;
 
     // Determine which provider to use (default to whisper)
@@ -378,10 +407,11 @@ async fn run_retranscription<R: Runtime>(
             (text, 0.9f32)
         } else {
             let engine = whisper_engine.as_ref().unwrap();
-            let (text, conf, _) = engine
+            let (text, conf, partial) = engine
                 .transcribe_audio_with_confidence(segment.samples.clone(), language.clone())
                 .await
                 .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
+            if automatic && partial {return Err(anyhow!("Cleanup returned partial text for segment {}; recording kept for retry",i+1));}
             (text, conf)
         };
 
@@ -396,10 +426,17 @@ async fn run_retranscription<R: Runtime>(
             all_transcripts.push((text, segment.start_timestamp_ms, segment.end_timestamp_ms));
             total_confidence += conf;
         } else {
+            if automatic {
+                return Err(anyhow!("Cleanup returned empty text for speech segment {}; live transcript and audio were kept", i + 1));
+            }
             debug!("Segment {}/{}: {:.1}s — empty transcription", i + 1, processable_count, segment_duration_sec);
         }
     }
 
+    if automatic && all_transcripts.is_empty() {
+        return Err(anyhow!("Cleanup produced no text; the live transcript and audio were kept"));
+    }
+    if automatic { reconcile_overlap(&mut all_transcripts); }
     let transcribed_count = all_transcripts.len();
     let avg_confidence = if transcribed_count > 0 {
         total_confidence / transcribed_count as f32
@@ -434,6 +471,16 @@ async fn run_retranscription<R: Runtime>(
         .await
         .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
 
+    if automatic {
+        let current: Vec<(String,String,Option<f64>,Option<f64>)> = sqlx::query_as(
+            "SELECT id,transcript,audio_start_time,audio_end_time FROM transcripts WHERE meeting_id=? ORDER BY id")
+            .bind(&meeting_id).fetch_all(&mut *tx).await?;
+        if current != original {
+            return Err(anyhow!("Transcript was edited during cleanup; your edits and audio were kept. Retry cleanup when editing is finished."));
+        }
+        // Disk failures must not replace the live database transcript.
+        write_transcripts_json(&folder_path, &segments)?;
+    }
     sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
         .bind(&meeting_id)
         .execute(&mut *tx)
@@ -497,6 +544,34 @@ async fn run_retranscription<R: Runtime>(
         duration_seconds,
         language,
     })
+}
+
+/// Remove only exact multi-word repetition at an actual overlapping audio boundary.
+/// Repeated words separated in time ("yes, yes") are preserved.
+fn reconcile_overlap(lines: &mut Vec<(String,f64,f64)>) {
+    for i in 1..lines.len() {
+        if lines[i].1 >= lines[i-1].2 {continue}
+        let previous: Vec<&str> = lines[i-1].0.split_whitespace().collect();
+        let current: Vec<&str> = lines[i].0.split_whitespace().collect();
+        let max=previous.len().min(current.len()).min(20);
+        let count=(2..=max).rev().find(|&n|previous[previous.len()-n..].iter().zip(&current[..n]).all(|(a,b)|a.eq_ignore_ascii_case(b))).unwrap_or(0);
+        if count>0 {lines[i].0=current[count..].join(" ");}
+    }
+    lines.retain(|line|!line.0.trim().is_empty());
+}
+
+#[cfg(test)] mod cleanup_overlap_tests {
+    use super::*;
+    #[test] fn removes_repetition_only_at_overlapping_context_boundaries(){
+        let mut lines=vec![("we agreed to ship next week".into(),0.,26000.),("next week after testing".into(),25000.,40000.),("after testing".into(),41000.,43000.)];
+        reconcile_overlap(&mut lines);
+        assert_eq!(lines[1].0,"after testing");
+        assert_eq!(lines[2].0,"after testing");
+    }
+    #[test] fn preserves_single_word_repetition_and_unicode(){
+        let mut lines=vec![("sí".into(),0.,2000.),("sí por favor".into(),1000.,3000.)];
+        reconcile_overlap(&mut lines);assert_eq!(lines[1].0,"sí por favor");
+    }
 }
 
 /// Emit progress event

@@ -63,6 +63,19 @@ class NativeHostTests(unittest.TestCase):
             self.assertFalse(responses[0]['accepted'])
             launch.assert_not_called()
 
+    def test_heartbeat_relaunches_app_and_retries(self):
+        message = {'event':'participants', 'provider':'google-meet', 'session':'live'}
+        failed = unittest.mock.MagicMock()
+        failed.__enter__.return_value.connect.side_effect = ConnectionRefusedError()
+        ready = unittest.mock.MagicMock()
+        ready.__enter__.return_value.makefile.return_value.readline.return_value = b'{"accepted":true}\n'
+        with patch.object(host.socket, 'socket', side_effect=[failed, ready]), \
+             patch.object(host.subprocess, 'run') as launch, \
+             patch.object(host, 'app_path', return_value='/Applications/MEATY.app'), \
+             patch.object(host.time, 'sleep'):
+            self.assertTrue(host.handle(message)['accepted'])
+            launch.assert_called_once_with(['/usr/bin/open', '-g', '/Applications/MEATY.app'], check=True, stdout=host.subprocess.DEVNULL)
+
     def test_configured_custom_app_target(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -78,7 +91,7 @@ class NativeHostTests(unittest.TestCase):
                 with self.assertRaises(ValueError): host.app_path()
 
     def test_reject_oversized_frame(self):
-        with patch.object(host.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(struct.pack('<I', 5000)))):
+        with patch.object(host.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(struct.pack('<I', 65537)))):
             with self.assertRaises(ValueError): host.main()
 
     def test_reject_wrong_provider(self):

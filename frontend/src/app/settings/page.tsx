@@ -1,4 +1,5 @@
 'use client';
+import { CompanySettings } from '@/components/CompanySettings';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
@@ -111,6 +112,7 @@ export default function SettingsPage() {
 
             <TabsContent value="general">
               <PreferenceSettings />
+              <CompanySettings />
             </TabsContent>
             <TabsContent value="recording">
               <RecordingSettings />

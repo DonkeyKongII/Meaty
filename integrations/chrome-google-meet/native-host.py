@@ -32,6 +32,11 @@ def handle(message):
         raise ValueError('Unsupported event')
     count = message.get('participant_count')
     if count is not None and (type(count) is not int or not 1 <= count <= 100): raise ValueError('Invalid participant count')
+    people = message.get('participants', [])
+    if not isinstance(people, list) or len(people)>100 or any(not isinstance(p,dict) or not isinstance(p.get('name'),str) or not 1<=len(p['name'])<=100 for p in people):
+        raise ValueError('Invalid participants')
+    for field,limit in [('meet_title',500),('meet_url',200)]:
+        if field in message and (not isinstance(message[field],str) or len(message[field])>limit): raise ValueError('Invalid '+field)
     session = message.get('session')
     if not isinstance(session, str) or not 1 <= len(session) <= 128: raise ValueError('Invalid session')
     path = str(Path.home() / 'Library/Application Support/com.meetily.ai/meeting-autostart.sock')
@@ -41,11 +46,13 @@ def handle(message):
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
                 connection.settimeout(3)
                 connection.connect(path)
-                connection.sendall(json.dumps(message).encode() + b'\n')
+                connection.sendall(json.dumps(message, ensure_ascii=False).encode() + b'\n')
                 result = json.loads(connection.makefile('rb').readline(4096))
                 break
         except (OSError, ValueError):
-            if message['event'] != 'joined':
+            # A heartbeat proves the call is still live after an app crash.
+            # Recover immediately instead of waiting for a second poll/join.
+            if message['event'] == 'ended':
                 return {'accepted':False, 'error':'Meetily is not running'}
             if attempt == 0:
                 subprocess.run(['/usr/bin/open', '-g', app_path()], check=True, stdout=subprocess.DEVNULL)
@@ -59,7 +66,7 @@ def main():
             return  # Port closed (or one-shot client finished): exit.
         if len(header) < 4: raise EOFError('Incomplete native message')
         length = struct.unpack('<I', header)[0]
-        if length > 4096: raise ValueError('Message too large')
+        if length > 65536: raise ValueError('Message too large')
         message = json.loads(exact_read(length))
         try:
             response = handle(message)

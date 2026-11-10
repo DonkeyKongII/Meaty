@@ -1,0 +1,51 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs'),path=require('node:path'),Module=require('node:module');
+const frontend=path.resolve(__dirname,'../../frontend');
+const ts=require(path.join(frontend,'node_modules/typescript'));
+const React=require(path.join(frontend,'node_modules/react'));
+const {create,act}=require(path.join(frontend,'node_modules/react-test-renderer'));
+const originalLoad=Module._load;
+const router={push(){}};
+const pending=[];
+const invoke=async(command,args)=>{
+ if(command==='api_search_transcripts')return new Promise(resolve=>pending.push({query:args.query,resolve}));
+ if(command==='api_get_meetings')return [];
+ if(command==='meeting_context_action')return {};
+ return null;
+};
+global.document={visibilityState:'hidden',addEventListener(){},removeEventListener(){}};
+Module._extensions['.tsx']=Module._extensions['.ts']=(module,file)=>module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText,file);
+Module._load=function(request,parent,isMain){
+ if(request==='next/navigation')return {usePathname:()=>'/meeting-details',useRouter:()=>router};
+ if(request==='@tauri-apps/api/core')return {invoke};
+ if(request==='@/contexts/RecordingStateContext')return {useRecordingState:()=>({isRecording:false})};
+ if(request==='@/lib/analytics')return {default:new Proxy({},{get:()=>()=>{}}),__esModule:true};
+ if(request==='@/lib/meeting-recording')return {companionOwnsRecording:()=>false};
+ if(request.startsWith('@/'))return originalLoad.call(this,path.join(frontend,'src',request.slice(2)),parent,isMain);
+ return originalLoad.call(this,request,parent,isMain);
+};
+const {SidebarProvider,useSidebar}=require(path.join(frontend,'src/components/Sidebar/SidebarProvider.tsx'));
+let state;
+function Search({query}){state=useSidebar();React.useEffect(()=>{void state.searchTranscripts(query);},[query,state.searchTranscripts]);return null;}
+const tree=query=>React.createElement(SidebarProvider,null,React.createElement(Search,{query}));
+test('search fires once per query and ignores stale responses and results after clearing',async()=>{
+ let view;await act(async()=>{view=create(tree('Will'));});
+ assert.equal(pending.length,1);
+ const first=state.searchTranscripts;
+ await act(async()=>{pending[0].resolve([{id:'will',title:'Will'}]);});
+ assert.equal(state.searchTranscripts,first);
+ assert.equal(pending.length,1,'search completion must not trigger another identical search');
+ await act(async()=>{view.update(tree('Ian'));});
+ await act(async()=>{view.update(tree('Eli'));});
+ assert.equal(pending.length,3);
+ await act(async()=>{pending[2].resolve([{id:'eli'}]);});
+ await act(async()=>{pending[1].resolve([{id:'ian'}]);});
+ assert.equal(state.searchResults[0].id,'eli');
+ await act(async()=>{view.update(tree('Will'));});
+ await act(async()=>{view.update(tree(''));});
+ assert.equal(state.isSearching,false);assert.deepEqual(state.searchResults,[]);
+ await act(async()=>{pending[3].resolve([{id:'late'}]);});
+ assert.deepEqual(state.searchResults,[]);
+ act(()=>view.unmount());
+});

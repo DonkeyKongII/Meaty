@@ -983,7 +983,13 @@ pub async fn api_save_transcript<R: Runtime>(
     .await
     {
         Ok(meeting_id) => {
-            let count=crate::meeting_autostart::finish_sampling();
+            let live=crate::live_meeting::take_for_save(&_app);
+            if let Some(live_id)=live["live_id"].as_str() {
+                if let Err(e)=crate::speakers::carry_live(&_app,live_id,&meeting_id).await {log::error!("Could not retain live speaker labels: {e}");}
+                if let Err(e)=crate::meeting_context::run_context(&_app,serde_json::json!({"action":"bridge","meeting_id":meeting_id,"data":live.clone()})).await {log::error!("Could not save Meet context: {e}");}
+            }
+            let peak=crate::meeting_autostart::finish_sampling().unwrap_or(0).max(live["participants"].as_array().map_or(0,|p|p.len() as u64));
+            let count=(peak>0).then_some(peak);
             crate::meeting_pipeline::enqueue(&_app,&meeting_id,auto_summary.unwrap_or(false)).await?;
             if let Err(e)=crate::speakers::enqueue(&_app, &meeting_id, count).await {
                 log::error!("Could not queue speaker analysis: {e}");

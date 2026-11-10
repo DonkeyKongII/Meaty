@@ -75,7 +75,7 @@ def clustering_warning(result):
     # A manually named transcript interval is not another detected voice.
     actual = sum(not speaker.get('id','').startswith('manual-') for speaker in result.get('speakers', []))
     expected = result.get('requested_speakers', -1)
-    limit = expected if expected > 0 else MAX_AUTOMATIC_SPEAKERS
+    limit = MAX_AUTOMATIC_SPEAKERS if result.get('count_is_estimate') else (expected if expected > 0 else MAX_AUTOMATIC_SPEAKERS)
     if actual > limit:
         return (f'Speaker detection split this recording into {actual} groups. '
                 'This result is unreliable. Enter the known number of speakers and re-detect before naming or saving voices.')
@@ -161,6 +161,25 @@ def consolidate_fragments(result, count):
     return dict(result, speakers=speakers, segments=turns, requested_speakers=count,
                 clustering_method='duration-weighted-spherical-v1', source_fragments=len(result['speakers']),
                 unassigned_seconds=round(sum(turn['end']-turn['start'] for turn in turns if turn['speaker']=='__unassigned__'),1))
+
+
+def estimate_speaker_count(speakers, expected):
+    """Use an expected-size seed, then retain acoustically distinct extra voices."""
+    import numpy as np
+    if not speakers:
+        return 0
+    vectors = [np.asarray(s['embedding'], dtype=float) for s in sorted(speakers,key=lambda s:s['clean_seconds'],reverse=True)]
+    vectors = [v/np.linalg.norm(v) for v in vectors if np.isfinite(v).all() and np.linalg.norm(v)>1e-8]
+    centers=[]
+    # Once the expected groups are present, require stronger separation before
+    # adding extras. Missing invitees never force a fabricated voice group.
+    for vector in vectors:
+        threshold = .65 if len(centers) < expected else .5
+        if not centers or max(float(vector @ center) for center in centers) < threshold:
+            centers.append(vector)
+    if len(centers)>MAX_AUTOMATIC_SPEAKERS:
+        raise ValueError('Too many distinct voice groups; existing labels were preserved.')
+    return len(centers)
 
 
 def analyze(request, root):
@@ -259,8 +278,14 @@ def analyze(request, root):
         result['estimated_speakers']=len(centers)
         result['requested_speakers']=-1
     elif count > 0:
-        result = consolidate_fragments(result, count)
-    validate_turn_count(result['segments'], count)
+        # Expected attendance is a hint, never a hard cap on distinct voices.
+        reliable = [v for v in speakers if v.get('embedding') and not v.get('mixed') and v['clean_seconds'] >= MIN_MATCH_SECONDS]
+        target = estimate_speaker_count(reliable, count)
+        if target:
+            result = consolidate_fragments(result, target)
+        result['requested_speakers']=count
+        result['count_is_estimate']=True
+    validate_turn_count(result['segments'], -1 if result.get('count_is_estimate') else count)
     return result
 
 
@@ -332,11 +357,12 @@ def run(request):
             if clustering_warning(result) and count == -1:
                 raise ValueError('The previous automatic analysis over-split the voices. Enter the known speaker count to re-detect.')
             same_count = result.get('requested_speakers', -1) == count
-            if row and result.get('segments') and not request.get('force',False) and same_count:
+            if row and any(not s['id'].startswith('manual-') for s in result.get('speakers',[])) and result.get('segments') and not request.get('force',False) and same_count:
                 return {**public_result(result,profiles),'profile_count':db.execute('SELECT count(*) FROM profiles').fetchone()[0]}
+            previous = result
             result = analyze(request, root)
             # Validate again at the persistence boundary, including alternate analyzers.
-            validate_turn_count(result['segments'], count)
+            validate_turn_count(result['segments'], -1 if result.get('count_is_estimate') else count)
             result['requested_speakers'] = count
             if clustering_warning(result):
                 raise ValueError(clustering_warning(result))
@@ -346,6 +372,39 @@ def run(request):
                     speaker['score'] = score
                     if profile:
                         speaker.update(name=profile['name'],profile_id=profile['id'],status='recognized')
+            manual = [s for s in previous.get('speakers',[]) if s['id'].startswith('manual-')]
+            manual_ids = {s['id'] for s in manual}
+            for span in previous.get('segments',[]):
+                if span['speaker'] not in manual_ids: continue
+                start,end=span['start'],span['end'];turns=[]
+                for turn in result['segments']:
+                    if turn['end']<=start or turn['start']>=end: turns.append(turn);continue
+                    if turn['start']<start: turns.append(dict(turn,end=start))
+                    if turn['end']>end: turns.append(dict(turn,start=end))
+                turns.append(span)
+                result['segments']=sorted(turns,key=lambda t:t['start'])
+            result['speakers'].extend(manual)
+        elif action == 'remove_tag':
+            import math
+            tag=json.loads(request.get('speaker_id','{}'))
+            start,end=tag.get('start'),tag.get('end'); selected=tag.get('id')
+            if any(type(v) not in (int,float) or not math.isfinite(v) for v in (start,end)) or start<0 or end<=start or end-start>600:
+                raise ValueError('Invalid transcript interval')
+            if result.get('analysis_warning') or clustering_warning(result):
+                raise ValueError('Review speaker detection before removing tags')
+            exclusions=result.get('speaker_tag_exclusions',[])
+            overlap={}
+            for turn in result['segments']:
+                duration=min(end,turn['end'])-max(start,turn['start'])
+                if duration>0 and not any(x['speaker']==turn['speaker'] and x['start']==start and x['end']==end for x in exclusions):
+                    overlap[turn['speaker']]=overlap.get(turn['speaker'],0)+duration
+            maximum=max(overlap.values(),default=0)
+            ids=[id for id,duration in overlap.items() if duration>=min(.25,maximum) and duration>=maximum*.2]
+            voices={v['id']:v for v in result['speakers']}
+            if selected not in ids or len(ids)<2 or voices.get(selected,{}).get('status','unknown')!='unknown' or not any(voices.get(id,{}).get('status','unknown') in ('manual','recognized') for id in ids if id!=selected):
+                raise ValueError('Only unidentified tags alongside a known person can be removed')
+            result['speaker_tag_exclusions']=exclusions+[{'start':start,'end':end,'speaker':selected}]
+            result['learning_notice']='Speaker tag removed from this passage.'
         elif action in ('enroll','label','assign'):
             selected=request.get('speaker_id','')
             if action=='assign' and selected.startswith('__span__:'):
@@ -399,6 +458,17 @@ def run(request):
                 db.execute('DELETE FROM profile_samples WHERE profile_id=? AND source NOT IN (SELECT source FROM profile_samples WHERE profile_id=? ORDER BY created_at DESC,rowid DESC LIMIT 12)',(profile_id,profile_id))
                 speaker['profile_id'] = profile_id
                 result['learning_notice']='Speaker assigned. Confirmed voice sample saved for future matching.'
+            if learning and eligible:
+                refreshed_profiles = profiles_from(db)
+                matched = 0
+                for other in result['speakers']:
+                    if other['status'] != 'unknown' or not other.get('embedding') or other.get('mixed') or other['clean_seconds'] < MIN_MATCH_SECONDS:
+                        continue
+                    profile, score = match_voice(other['embedding'], refreshed_profiles)
+                    if profile:
+                        other.update(name=profile['name'],profile_id=profile['id'],status='recognized',score=score)
+                        matched += 1
+                result['learning_notice'] += f' Checked other voices: {matched} matched.'
         elif action == 'rename':
             name=request.get('name','').strip()
             if not name or len(name)>100: raise ValueError('Enter a name between 1 and 100 characters.')
@@ -417,7 +487,7 @@ def run(request):
                     result = stored
         elif action != 'get':
             raise ValueError('Unsupported speaker action.')
-        if action in ('analyze','enroll','label','assign'):
+        if action in ('analyze','enroll','label','assign','remove_tag'):
             db.execute('INSERT OR REPLACE INTO meetings VALUES (?,?)',(key,json.dumps(result)))
         profiles=profiles_from(db,[p.get('profile_id') for p in result['speakers']],embeddings=False)
         return {**public_result(result,profiles),'profile_count':db.execute('SELECT count(*) FROM profiles').fetchone()[0]}

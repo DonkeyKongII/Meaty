@@ -166,16 +166,16 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       <div>
         <h3 className="text-lg font-semibold mb-4">Recording Settings</h3>
         <p className="text-sm text-gray-600 mb-6">
-          Configure how your audio recordings are saved during meetings.
+          MEATY saves audio during meetings and cleans up the transcript afterward. Summaries wait for the cleaned transcript.
         </p>
       </div>
 
       {/* Auto Save Toggle */}
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
-          <div className="font-medium">Save Audio Recordings</div>
+          <div className="font-medium">Keep Audio After Processing</div>
           <div className="text-sm text-gray-600">
-            Automatically save audio files when recording stops
+            Keep the recording after transcript cleanup and speaker analysis finish
           </div>
         </div>
         <Switch
@@ -217,7 +217,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {!preferences.auto_save && (
         <div className="p-4 border rounded-lg bg-yellow-50">
           <div className="text-sm text-yellow-800">
-            Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.
+            Audio is saved temporarily for transcript cleanup and speaker analysis, then deleted after both succeed. If processing fails, audio is kept for retry.
           </div>
         </div>
       )}

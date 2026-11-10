@@ -254,21 +254,11 @@ const Sidebar: React.FC = () => {
     }
   }, []);
 
-  // Execute transcript search and folder expansion when debounced query updates
+  // Folder expansion is derived from the query in renderItem. Only a changed
+  // debounced query should issue a search, including clearing an active search.
   useEffect(() => {
-    const trimmed = debouncedSearchQuery.trim();
-    if (!trimmed) return;
-
-    void searchTranscripts(trimmed);
-
-    if (!expandedFolders.has('meetings')) {
-      setExpandedFolders(prev => {
-        const newExpanded = new Set(prev);
-        newExpanded.add('meetings');
-        return newExpanded;
-      });
-    }
-  }, [debouncedSearchQuery, searchTranscripts, expandedFolders]);
+    void searchTranscripts(debouncedSearchQuery.trim());
+  }, [debouncedSearchQuery, searchTranscripts]);
 
   // Combine search results with sidebar items
   const filteredSidebarItems = useMemo(() => {

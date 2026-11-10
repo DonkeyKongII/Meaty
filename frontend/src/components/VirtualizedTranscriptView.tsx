@@ -1,4 +1,5 @@
 'use client';
+import type {SpeakerTag} from '@/lib/speaker-labels';
 
 import { useCallback, useRef, useReducer, startTransition, useEffect, useState, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -13,8 +14,10 @@ import { TranscriptSegmentData } from "@/types";
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
     segments: TranscriptSegmentData[];
-    speakerTags?: Record<string,{id:string;name:string}[]>;
-    onAssignSpeaker?: (target:{id:string;name:string})=>void;
+    speakerTags?: Record<string,SpeakerTag[]>;
+    onAssignSpeaker?: (target:SpeakerTag)=>void;
+    onAssignTimestamp?: (start:number,end?:number)=>void;
+    endTime?:number;
     speakerLabels?: Record<string, string|undefined>;
     /** Whether recording is in progress */
     isRecording?: boolean;
@@ -72,6 +75,7 @@ function cleanStopWords(text: string): string {
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
     timestamp,
+    endTime,
     text,
     confidence,
     isStreaming,
@@ -79,9 +83,12 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerLabel,
     speakerTags,
     onAssignSpeaker,
+    onAssignTimestamp,
 }: {
-    speakerTags?: {id:string;name:string}[];
-    onAssignSpeaker?: (target:{id:string;name:string})=>void;
+    speakerTags?: SpeakerTag[];
+    onAssignSpeaker?: (target:SpeakerTag)=>void;
+    onAssignTimestamp?: (start:number,end?:number)=>void;
+    endTime?:number;
     speakerLabel?: string;
     id: string;
     timestamp: number;
@@ -96,7 +103,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
         <div id={`segment-${id}`} className="meaty-transcript-segment mb-3">
             <div className="flex items-start gap-2">
                 <Tooltip>
-                    <TooltipTrigger data-meaty-timestamp>
+                    <TooltipTrigger data-meaty-timestamp type="button" onClick={onAssignTimestamp?()=>onAssignTimestamp(timestamp,endTime):undefined} aria-label={onAssignTimestamp?`Assign speaker at ${formatRecordingTime(timestamp)}`:undefined} className={onAssignTimestamp?"cursor-pointer hover:underline":""}>
                         <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
                             {formatRecordingTime(timestamp)}
                         </span>
@@ -127,6 +134,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     speakerLabels,
     speakerTags,
     onAssignSpeaker,
+    onAssignTimestamp,
     isRecording = false,
     isPaused = false,
     isProcessing = false,
@@ -315,6 +323,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                     <TranscriptSegment
                                         id={segment.id}
                                         timestamp={segment.timestamp}
+                                        endTime={segment.endTime}
+                                        onAssignTimestamp={onAssignTimestamp}
                                         text={getDisplayText(segment)}
                                         speakerLabel={speakerLabels?.[segment.id]}
                                         speakerTags={speakerTags?.[segment.id]}
@@ -374,6 +384,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                     <TranscriptSegment
                                         id={segment.id}
                                         timestamp={segment.timestamp}
+                                        endTime={segment.endTime}
+                                        onAssignTimestamp={onAssignTimestamp}
                                         text={getDisplayText(segment)}
                                         speakerLabel={speakerLabels?.[segment.id]}
                                         speakerTags={speakerTags?.[segment.id]}

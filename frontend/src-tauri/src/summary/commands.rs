@@ -528,7 +528,8 @@ pub async fn api_process_transcript<R: Runtime>(
     let meeting_id_clone = m_id.clone();
     tauri::async_runtime::spawn(async move {
         let prepared=async {
-            crate::meeting_pipeline::prepare(&pool,&meeting_id_clone,&cancellation_token).await?;
+            let text=crate::meeting_pipeline::prepared_transcript(&pool,&meeting_id_clone,&cancellation_token,text).await?;
+            TranscriptChunksRepository::save_transcript_data(&pool,&meeting_id_clone,&text,&model,&model_name,chunk_size,overlap).await.map_err(|e|e.to_string())?;
             let root=app.path().app_data_dir().map_err(|e|e.to_string())?;
             let text=crate::speakers::summary_text(&root,&pool,&meeting_id_clone,&text).await?;
             crate::meeting_pipeline::calendar_text(&pool,&meeting_id_clone,text).await

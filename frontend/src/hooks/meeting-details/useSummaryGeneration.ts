@@ -244,7 +244,7 @@ export function useSummaryGeneration({
         return;
       }
       const metadata = readSummaryMetadata(pollingResult.data);
-      const meetingName = metadata.meetingName || pollingResult.meetingName;
+      const meetingName = pollingResult.meetingName || metadata.meetingName;
       if (meetingName) {
         updateMeetingTitle(meetingName);
       }

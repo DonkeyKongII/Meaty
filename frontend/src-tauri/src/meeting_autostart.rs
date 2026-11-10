@@ -46,7 +46,7 @@ pub fn start<R: tauri::Runtime>(
             let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
             let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
             let mut line = String::new();
-            let read = BufReader::new(std::io::Read::take(&mut stream, 4096)).read_line(&mut line);
+            let read = BufReader::new(std::io::Read::take(&mut stream, 65536)).read_line(&mut line);
             let accepted = read.is_ok()
                 && serde_json::from_str::<serde_json::Value>(&line)
                     .ok()
@@ -61,6 +61,7 @@ pub fn start<R: tauri::Runtime>(
                         {
                             return false;
                         }
+                        crate::live_meeting::observe(&message);
                         {
                             let mut c=COUNTS.lock().unwrap_or_else(|e|e.into_inner());
                             if message["event"] == "ended" {c.end_session(session);}

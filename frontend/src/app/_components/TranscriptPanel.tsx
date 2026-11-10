@@ -9,7 +9,10 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
-import { useMemo } from 'react';
+import { useMemo, useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { SpeakerAssignment } from '@/components/MeetingDetails/SpeakerAssignment';
+import { SpeakerAnalysis, SpeakerTag, speakerLabel } from '@/lib/speaker-labels';
 
 /**
  * TranscriptPanel Component
@@ -37,6 +40,18 @@ export function TranscriptPanel({
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
   const isLinux = useIsLinux();
 
+  const [liveId,setLiveId]=useState('');
+  const [speakerData,setSpeakerData]=useState<SpeakerAnalysis|null>(null);
+  const [target,setTarget]=useState<SpeakerTag|null>(null);
+  useEffect(()=>{
+    let active=true;
+    if(isRecording)invoke<{live_id?:string}>('meeting_context_action',{request:{action:'live'}}).then(value=>{
+      if(!active||!value.live_id)return;setLiveId(value.live_id);
+      invoke<SpeakerAnalysis>('speaker_action',{meetingId:value.live_id,action:'get'}).then(data=>{if(active)setSpeakerData(data);}).catch(()=>{});
+    }).catch(()=>{});
+    else setTarget(null);
+    return()=>{active=false;};
+  },[isRecording]);
   // Convert transcripts to segments for virtualized view
   const segments = useMemo(() =>
     transcripts.map(t => ({
@@ -51,6 +66,7 @@ export function TranscriptPanel({
 
   return (
     <div className="w-full h-full border-r border-gray-200 bg-white flex flex-col min-h-0 overflow-hidden">
+      {target&&liveId&&<SpeakerAssignment key={target.id} meetingId={liveId} target={target} data={speakerData} live onSave={setSpeakerData} onClose={()=>setTarget(null)}/>}
       {/* Title area - Sticky header */}
       <div className="shrink-0 bg-white p-4 border-gray-200">
         <div className="flex flex-col space-y-3">
@@ -108,6 +124,8 @@ export function TranscriptPanel({
             <VirtualizedTranscriptView
               containerRef={transcriptContainerRef}
               segments={segments}
+              speakerLabels={Object.fromEntries(segments.map(s=>[s.id,speakerLabel(speakerData,s.timestamp,s.endTime)]))}
+              onAssignTimestamp={isRecording&&liveId?(start,end)=>{const segment=transcripts.find(t=>t.audio_start_time===start);if(segment?.audio_start_time==null)return;setTarget({id:`__span__:${start}:${end!=null&&end>start?end:start+0.5}`,name:'Unidentified speaker'});}:undefined}
               isRecording={isRecording}
               isPaused={isPaused}
               isProcessing={isProcessingStop}

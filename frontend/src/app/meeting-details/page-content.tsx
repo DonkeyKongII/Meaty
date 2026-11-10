@@ -201,6 +201,9 @@ export default function PageContent({
           }}
           transcript={
             <TranscriptPanel
+              key={meeting.id}
+              meetingTitle={meetingData.meetingTitle}
+              onTitleChange={meetingData.updateMeetingTitle}
               transcripts={meetingData.transcripts}
               customPrompt={customPrompt}
               onPromptChange={setCustomPrompt}

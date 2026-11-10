@@ -9,8 +9,16 @@ use tauri::Manager;
 #[tauri::command]
 pub async fn meeting_context_action(
     app: tauri::AppHandle,
-    mut request: Value,
+    request: Value,
 ) -> Result<Value, String> {
+    run_context(&app,request).await
+}
+pub async fn run_context<R:tauri::Runtime>(app:&tauri::AppHandle<R>,mut request:Value)->Result<Value,String> {
+    if request["action"] == "live" {return Ok(crate::live_meeting::snapshot(&app));}
+    if request["action"] == "get" && request["meeting_id"].as_str().is_some_and(|id|id.starts_with("live-")) {
+        let snapshot=crate::live_meeting::snapshot(&app);
+        return if snapshot["live_id"]==request["meeting_id"] {Ok(snapshot)} else {Err("This recording has ended".into())};
+    }
     if request["action"] == "combine" {
         if crate::audio::recording_commands::is_recording().await {
             return Err("Finish recording before combining meetings".into());

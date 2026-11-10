@@ -2,8 +2,8 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {listen} from '@tauri-apps/api/event';
 import {convertFileSrc, invoke} from '@tauri-apps/api/core';
-import {ProfileSearch,SpeakerAssignment,Profile} from './SpeakerAssignment';
-import {SpeakerAnalysis} from '@/lib/speaker-labels';
+import {SpeakerAssignment} from './SpeakerAssignment';
+import {groupedSpeakers,SpeakerAnalysis} from '@/lib/speaker-labels';
 
 export function SpeakerPanel({meetingId, disabled, onChange}: {
   meetingId:string; disabled:boolean; onChange:(value:SpeakerAnalysis|null)=>void;
@@ -11,17 +11,16 @@ export function SpeakerPanel({meetingId, disabled, onChange}: {
   const [data,setData]=useState<SpeakerAnalysis|null>(null);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
-  const [count,setCount]=useState('');
+  const [count,setCount]=useState('0');
+  const countEdited=useRef(false);
   const [assignTarget,setAssignTarget]=useState<{id:string;name:string}|null>(null);
-  const [profilesOpen,setProfilesOpen]=useState(false);
-  const [managed,setManaged]=useState<Profile|null>(null);
   const [saved,setSaved]=useState(false);
   const currentMeeting=useRef(meetingId);
   currentMeeting.current=meetingId;
   useEffect(()=>{
-    let active=true;setData(null);setCount('');setError('');setBusy(false);onChange(null);
+    let active=true;setData(null);setCount('0');countEdited.current=false;setError('');setBusy(false);onChange(null);
     invoke<SpeakerAnalysis>('speaker_action',{meetingId,action:'get'}).then(result=>{
-      if(active){setData(result);if(result.requested_speakers&&result.requested_speakers>0)setCount(String(result.requested_speakers));onChange(result);}
+      if(active){setData(result);if(!countEdited.current&&result.requested_speakers!=null&&result.requested_speakers>0){setCount(String(Math.max(0,result.requested_speakers)));countEdited.current=true;}onChange(result);}
     }).catch(reason=>{if(active)setError(String(reason));});
     return()=>{active=false;};
   },[meetingId,onChange]);
@@ -58,42 +57,36 @@ export function SpeakerPanel({meetingId, disabled, onChange}: {
     const update=(event:Event)=>{const d=(event as CustomEvent).detail;if(d.meetingId===meetingId){setData(d.value);onChange(d.value);}};
     window.addEventListener('speaker-labels-saved',update);return()=>window.removeEventListener('speaker-labels-saved',update);
   },[meetingId,onChange]);
-  return <details className="border-b border-gray-200 p-3 text-sm">
-    <summary className="cursor-pointer font-medium">Speakers {data?.analysis_warning?'— re-analysis needed':data?.speakers.length?`(${data.speakers.length})`:''}</summary>
-    <div className="mt-3 max-h-[38vh] space-y-3 overflow-y-auto pr-2">
-      <p className="text-gray-600">Detected speakers are saved automatically. Listen to a sample, name the speaker, and optionally save their voice for future meetings. Audio and voice profiles stay on this Mac. After saving speaker names, regenerate the summary to use those assignments.</p>
-      <p className="text-xs text-gray-600">Speaker detection runs automatically after a meeting is saved. You can retry or adjust the count below.</p>
-      {data?.participant_count&&<p className="text-xs text-gray-600">Peak observed attendance: {data.participant_count}. Attendees who never spoke may not form a voice group.</p>}
-      {(data?.job_status==='queued'||data?.job_status==='running')&&<p role="status">{data.job_status==='queued'?'Speaker detection queued.':'Detecting speakers in the background… You can leave this meeting.'}</p>}
-      {data?.job_status==='failed'&&<p role="alert" className="text-amber-800">Automatic detection could not finish: {data.job_error} Retry below.</p>}
-      {data?.learning_notice&&<p role="status" className="text-xs text-gray-600">{data.learning_notice}</p>}
-      {saved&&<p role="status" className="text-green-700">Speaker saved.</p>}
-      {!!data?.unassigned_seconds && <p className="text-xs text-gray-600">About {Math.round(data.unassigned_seconds)} seconds of speech could not be assigned reliably. These passages remain unassigned rather than creating extra speakers.</p>}
-      {data?.analysis_warning && <p role="alert" className="text-amber-800">{data.analysis_warning}</p>}
-      <p className="text-xs text-gray-600">For meetings, enter the known number of people who spoke. Automatic counts are experimental and can split one person into many groups.</p>
-      <fieldset disabled={busy||disabled||data?.job_status==='running'} className="space-y-3 disabled:opacity-60">
-        <div className="flex items-center gap-2">
-          <label>Speaker count <input aria-label="Speaker count (leave empty for automatic)" type="number" min={1} max={20} placeholder="Known count" value={count} onChange={e=>setCount(e.target.value)} className="w-20 rounded border p-1"/></label>
-          <button type="button" className="rounded border px-3 py-1" onClick={()=>act('analyze',{numSpeakers:count?Number(count):-1,force:!!data?.segments.length})}>{data?.segments.length?'Re-detect speakers':'Detect speakers'}</button>
-        </div>
-        {!!data?.segments.length && <p className="text-xs text-gray-500">Re-detecting replaces this meeting’s speaker labels. Saved voice profiles remain.</p>}
-        {!data?.analysis_warning&&data?.speakers.map(speaker=><div key={speaker.id} className="space-y-2 rounded border p-3">
-          <div className="font-medium">{speaker.status==='unknown'?'Unidentified speaker':speaker.name}</div>
-          {speaker.sample_path&&<audio controls preload="none" src={convertFileSrc(speaker.sample_path)} className="h-9 w-full"/>}
-          <button type="button" className="text-blue-700" onClick={()=>setAssignTarget({id:speaker.id,name:speaker.name})}>Assign or change speaker</button>
-        </div>)}
-        <details onToggle={e=>setProfilesOpen(e.currentTarget.open)}><summary className="cursor-pointer">Saved speakers ({data?.profile_count??data?.profiles.length??0})</summary>
-          {profilesOpen&&<ProfileSearch meetingId={meetingId} onSelect={setManaged}/>}
-          {managed&&<form className="my-2 space-y-2" key={managed.id+managed.name} onSubmit={e=>{e.preventDefault();void act('rename',{profileId:managed.id,name:String(new FormData(e.currentTarget).get('name')||'')});setManaged(null);}}>
-           <input name="name" aria-label="Rename saved speaker" defaultValue={managed.name} maxLength={100} className="rounded border p-1"/>
-           <button type="submit" className="ml-2">Rename</button><button type="button" className="ml-2" onClick={()=>{void act('forget',{profileId:managed.id});setManaged(null);}}>Delete voice profile</button>
-          </form>}
-        </details>
-      </fieldset>
-      <div role="status" aria-live="polite">{busy?'Analyzing or saving speakers locally… This can take several minutes.':''}</div>
-      {error && <p role="alert" className="text-red-700">{error}</p>}
-      {data && !busy && !error && !data.segments.length && <p className="text-xs text-gray-500">No speaker analysis yet. Very short clips or silence may not contain enough speech.</p>}
-      {assignTarget&&<SpeakerAssignment key={`${meetingId}:${assignTarget.id}`} meetingId={meetingId} target={assignTarget} data={data} onClose={()=>setAssignTarget(null)} onSave={value=>{setData(value);onChange(value);setSaved(true);}}/>}
-    </div>
-  </details>;
+  useEffect(()=>{
+    let active=true;
+    const load=()=>invoke<{participants?:unknown[];calendar_title?:string;meet_title?:string}>('meeting_context_action',{request:{action:'get',meeting_id:meetingId}}).then(context=>{if(active&&!countEdited.current&&(context.calendar_title||context.meet_title))setCount(String(Math.min(20,context.participants?.length||0)));}).catch(()=>{});
+    void load();const timer=setInterval(load,15000);return()=>{active=false;clearInterval(timer);};
+  },[meetingId]);
+  const groups=groupedSpeakers(data);
+  const running=busy||data?.job_status==='queued'||data?.job_status==='running';
+  const voice=(speaker:SpeakerAnalysis['speakers'][number],labels?:string[])=><div key={speaker.id} className="space-y-2 border-b py-3">
+    <div className="font-semibold">{speaker.status==='unknown'?'Unidentified speaker':speaker.name}</div>
+    <div className="text-xs text-gray-500">{labels?.join(' + ')||`Voice ${speaker.id}`}</div>
+    {speaker.sample_path&&<audio controls preload="none" src={convertFileSrc(speaker.sample_path)} className="h-9 w-full"/>}
+    <button type="button" disabled={running||disabled} className="meaty-action" onClick={()=>setAssignTarget({id:speaker.id,name:speaker.name})}>{speaker.status==='unknown'?'Identify':'Change person'}</button>
+  </div>;
+  return <section className="border-b p-4 text-sm space-y-3" aria-label="Speakers">
+    <div className="flex items-center justify-between gap-3"><h2 className="font-semibold">Speakers</h2><span className="font-mono text-xl font-bold" aria-label={`${groups.known.length} identified people, ${groups.unresolved.length} unresolved voices`}>{groups.known.length} / {groups.unresolved.length}</span></div>
+    <fieldset disabled={running||disabled} className="flex flex-wrap items-end gap-3 disabled:opacity-60">
+      <div><label htmlFor="expected-speakers" className="mb-2 block">Expected speakers</label><div className="meaty-speaker-stepper">
+        <input id="expected-speakers" aria-label="Expected speakers; zero means unknown" type="number" min={0} max={20} step={1} value={count} onChange={e=>{countEdited.current=true;setCount(e.target.value);}}/>
+        <div><button type="button" aria-label="Increase expected speakers" onClick={()=>{countEdited.current=true;setCount(String(Math.min(20,(Number(count)||0)+1)));}}>▴</button><button type="button" aria-label="Decrease expected speakers" onClick={()=>{countEdited.current=true;setCount(String(Math.max(0,(Number(count)||0)-1)));}}>▾</button></div>
+      </div></div>
+      <button type="button" className="meaty-action meaty-yellow-action" onClick={()=>{const n=Number(count);if(!Number.isInteger(n)||n<0||n>20){setError('Enter a whole number from 0 to 20.');return;}void act('analyze',{numSpeakers:n||-1,force:!!data?.segments.length});}}>{running?'Detecting…':'Detect speakers'}</button>
+    </fieldset>
+    {running&&<p role="status" aria-live="polite" className="flex items-center gap-2"><span className="meaty-busy-indicator"/>Detecting speakers…</p>}
+    {data?.job_status==='failed'&&<p role="alert">{data.job_error||'Detection failed. Try again.'}</p>}
+    {data?.learning_notice&&<p role="status">{data.learning_notice}</p>}
+    {saved&&<p role="status">Speaker saved.</p>}
+    {data?.analysis_warning&&<p role="alert">{data.analysis_warning}</p>}
+    {!data?.analysis_warning&&groups.known.map(group=>voice(group[0],group.map(s=>`Voice ${s.id}`)))}
+    <details><summary className="cursor-pointer font-semibold">Unresolved voices ({groups.unresolved.length})</summary>{!data?.analysis_warning&&groups.unresolved.map(s=>voice(s))}</details>
+    {error&&<p role="alert" className="text-red-700">{error}</p>}
+    {assignTarget&&<SpeakerAssignment key={`${meetingId}:${assignTarget.id}`} meetingId={meetingId} target={assignTarget} data={data} onClose={()=>setAssignTarget(null)} onSave={value=>{setData(value);onChange(value);setSaved(true);}}/>}
+  </section>;
 }
